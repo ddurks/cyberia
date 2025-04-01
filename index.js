@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.139.0/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.117.1/examples/jsm/controls/OrbitControls.js";
+import { mergeBufferGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.139.0/examples/jsm/utils/BufferGeometryUtils.js';
 import * as CANNON from "cannon";
 
 var IS_MOBILE;
@@ -243,7 +244,7 @@ export class CharacterControls {
       );
       if (intersects.length > 0) {
         const targetY = intersects[0].point.y;
-        this.model.position.y += (targetY - this.model.position.y) * 0.3;
+        this.model.position.y += (targetY - this.model.position.y) * 0.25;
         body.position.y = this.model.position.y;
       }
     }
@@ -543,6 +544,9 @@ export class Level {
   currentPlayerRoomZ = 0;
   planeSize = 100;
   planeMeshes = [];
+  treeTypes = {};     // Holds tree { geometry, material }
+  treeMeshes = {};    // Holds InstancedMesh for each tree type
+  treeInstanceCounters = {}; // Track current count per type
 
   constructor() {
     this.light();
@@ -581,7 +585,7 @@ export class Level {
     scene.add(this.sunLight);
 
     // ❄️ Cool Ambient Light for Snow Contrast
-    const ambientLight = new THREE.AmbientLight(0xaad4ff, 0.4); // Cold blue tone
+    const ambientLight = new THREE.AmbientLight(0xE3F2FD, 0.4); // Cold blue tone
     scene.add(ambientLight);
 
     // 🌊 Subtle Bounce Light (Reflects off snow)
@@ -679,12 +683,13 @@ export class Level {
         x * this.planeSize,
         0,
         z * this.planeSize,
-        this.planeSize
       );
       this.spawnedPlanes.add(key);
       this.planeMeshes.push(newPlane);
+      this.placeTreesOnPlane(newPlane);
     }
   }
+
 
   updatePlayerPlane(playerPosition) {
     let newRoomX = Math.floor(playerPosition.x / this.planeSize);
@@ -711,6 +716,58 @@ export class Level {
     }
   }
 
+  placeTreesOnPlane(plane) {
+    plane.updateMatrixWorld(true); // Make sure transforms are up to date
+  
+    const keys = Object.keys(this.treeTypes);
+    if (!keys.length) return;
+  
+    const numTrees = 100+ Math.floor(Math.random() * 100);
+  
+    for (let i = 0; i < numTrees; i++) {
+      const localX = (Math.random() - 0.5) * this.planeSize;
+      const localZ = (Math.random() - 0.5) * this.planeSize;
+  
+      const localPosition = new THREE.Vector3(localX, 0, localZ);
+      const worldPosition = localPosition.applyMatrix4(plane.matrixWorld);
+  
+      raycaster.set(worldPosition.clone().add(new THREE.Vector3(0, 100, 0)), downVector);
+      const intersects = raycaster.intersectObject(plane, true);
+      if (intersects.length === 0) continue;
+  
+      const { point, face } = intersects[0];
+      const normal = face.normal.clone().normalize();
+  
+      // Random tree type
+      const treeName = keys[Math.floor(Math.random() * keys.length)];
+      const parts = this.treeTypes[treeName];
+  
+      const treeGroup = new THREE.Group();
+  
+      parts.forEach((part) => {
+        const mesh = new THREE.Mesh(part.geometry, part.material.clone());
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        treeGroup.add(mesh);
+      });
+  
+      // Align to ground normal and spin
+      const up = new THREE.Vector3(0, 1, 0);
+      const alignQuat = new THREE.Quaternion().setFromUnitVectors(up, normal);
+      const rotationY = Math.random() * Math.PI * 2;
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(normal, rotationY);
+  
+      treeGroup.quaternion.copy(alignQuat);
+      treeGroup.quaternion.premultiply(spinQuat);
+  
+      const scale = 0.75 + Math.random() * 0.5;
+      treeGroup.scale.setScalar(scale);
+      const snowDepth = 0.15;
+      treeGroup.position.copy(point).add(new THREE.Vector3(0, -snowDepth, 0));
+      scene.add(treeGroup);
+    }
+  }
+
   update(elapsedTime) {
     this.planeMeshes.forEach((planeMesh) => {
       let geometry = planeMesh.geometry;
@@ -725,7 +782,7 @@ export class Level {
 
   initSnowfall() {
     this.snowConfig = {
-      particleCount: 1000,
+      particleCount: 10000,
       boxSize: 100, // Area size around player
       height: 50, // How high snow starts above player
       fallSpeed: 0.1, // Base fall speed
@@ -898,6 +955,32 @@ var characterControls,
   guy,
   animationsMap = new Map(),
   body;
+
+  gLoader.load("./assets/snowtrees.glb", (gltf) => {
+    gltf.scene.traverse((child) => {
+      if (child.name.startsWith("tree00")) {
+        const meshes = [];
+  
+        child.traverse((sub) => {
+          if (sub.isMesh) {
+            meshes.push(sub);
+          }
+        });
+  
+        if (meshes.length === 0) return;
+  
+        level.treeTypes[child.name] = meshes.map((mesh) => ({
+          geometry: mesh.geometry.clone(),
+          material: mesh.material.clone(),
+          name: mesh.name,
+        }));
+      }
+    });
+
+    level.planeMeshes.forEach((plane) => level.placeTreesOnPlane(plane));
+
+  });
+  
 gLoader.load("./assets/cyberian.glb", (gltf) => {
   gltf.scene.traverse(function (object) {
     if (object.isMesh) object.castShadow = true;
