@@ -1,0 +1,48 @@
+html, body {
+    margin: 0;
+    height: 100%;
+    background: #a8def0;
+}
+#loading {
+    width: 100%;
+    display: block;
+    position: absolute;
+    top: 40%;
+}
+#controls {
+    position: absolute;
+    top: 0;
+    left: 10px;
+    z-index:100;
+}
+
+#joystickWrapper1 {
+    pointer-events: auto;
+    display: block;
+    position: absolute;
+    bottom: 15%;
+    left:0;
+    right:0;
+    margin-left:auto;
+    margin-right:auto;
+    background-color: transparent;
+    width: 120px;
+    height: 120px;
+    z-index: 12;
+    touch-action: manipulation;
+}
+
+#joystickWrapper2 {
+    pointer-events: auto;
+    display: block;
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    left: auto;
+    background-color: transparent;
+    width: 50vw;
+    height: 140px;
+    z-index: 12;
+    touch-action: manipulation;
+    display: none;
+}
