@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.139.0/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.117.1/examples/jsm/controls/OrbitControls.js";
-import { mergeBufferGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.139.0/examples/jsm/utils/BufferGeometryUtils.js';
 import * as CANNON from "cannon";
 
 var IS_MOBILE;
@@ -17,6 +16,7 @@ if (
 } else {
   IS_MOBILE = false;
 }
+document.body.classList.add(IS_MOBILE ? "mobile" : "desktop");
 
 export const W = "w";
 export const A = "a";
@@ -63,7 +63,8 @@ export class Joystick {
       mode: "static",
       restJoystick: true,
       shape: "circle",
-      position: { top: "60px", left: "60px" },
+      color: 'red',
+      position: { left: "auto", right: "0px", bottom: "0px" },
       dynamicPage: true,
     };
 
@@ -547,6 +548,9 @@ export class Level {
   treeTypes = {};     // Holds tree { geometry, material }
   treeMeshes = {};    // Holds InstancedMesh for each tree type
   treeInstanceCounters = {}; // Track current count per type
+  treeCollisionData = [];
+  activeTreeBodies = [];
+  spawnedTreeGroups = [];
 
   constructor() {
     this.light();
@@ -625,8 +629,8 @@ export class Level {
     const geometry = new THREE.PlaneGeometry(
       this.planeSize,
       this.planeSize,
-      50,
-      50
+      IS_MOBILE ? 20 : 50,
+      IS_MOBILE ? 20 : 50
     );
     geometry.rotateX(-Math.PI * 0.5);
 
@@ -746,8 +750,8 @@ export class Level {
   
       parts.forEach((part) => {
         const mesh = new THREE.Mesh(part.geometry, part.material.clone());
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        mesh.castShadow = IS_MOBILE ? false : true;
+        mesh.receiveShadow =  IS_MOBILE ? false : true;
         treeGroup.add(mesh);
       });
   
@@ -760,30 +764,85 @@ export class Level {
       treeGroup.quaternion.copy(alignQuat);
       treeGroup.quaternion.premultiply(spinQuat);
   
-      const scale = 0.75 + Math.random() * 0.5;
+      const scale = 1 + Math.random();
       treeGroup.scale.setScalar(scale);
       const snowDepth = 0.15;
       treeGroup.position.copy(point).add(new THREE.Vector3(0, -snowDepth, 0));
       scene.add(treeGroup);
-    }
+
+      this.spawnedTreeGroups.push({
+        mesh: treeGroup,
+        position: treeGroup.position.clone()
+      });
+
+      const bbox = new THREE.Box3().setFromObject(treeGroup);
+      const height = bbox.max.y - bbox.min.y;
+      const radius = (bbox.max.x - bbox.min.x + bbox.max.z - bbox.min.z) * 0.02;
+      this.treeCollisionData.push({
+        position: treeGroup.position.clone(),
+        quaternion: treeGroup.quaternion.clone(),
+        radius,
+        height,
+      });
+    } 
   }
 
-  update(elapsedTime) {
-    this.planeMeshes.forEach((planeMesh) => {
-      let geometry = planeMesh.geometry;
-      this.vertData.forEach((vd, idx) => {
-        let y = vd.initH + Math.sin(elapsedTime + vd.phase) * vd.amplitude;
-        geometry.attributes.position.setY(idx, y);
-      });
-      geometry.attributes.position.needsUpdate = true;
-      geometry.computeVertexNormals();
+  updateTreeCollisions(playerPosition, activationRadius = 20) {
+    this.treeCollisionData.forEach((data) => {
+      if (!data || !data.position) return;
+  
+      const distance = playerPosition.distanceTo(data.position);
+      if (distance < activationRadius && !data.body) {
+        const shape = new CANNON.Cylinder(data.radius, data.radius, data.height, 8);
+        const body = new CANNON.Body({
+          mass: 0,
+          shape: shape,
+          position: new CANNON.Vec3(
+            data.position.x,
+            data.position.y + data.height / 2,
+            data.position.z
+          ),
+        });
+        body.quaternion.set(
+          data.quaternion.x,
+          data.quaternion.y,
+          data.quaternion.z,
+          data.quaternion.w
+        );
+  
+        data.body = body;
+        world.addBody(body);
+      }
+    });
+  }
+
+  updateTreeVisibility(playerPosition, viewDistance = 100) {
+    this.spawnedTreeGroups.forEach(({ mesh, position }) => {
+      const distSq = playerPosition.distanceToSquared(position);
+      if (distSq < viewDistance * viewDistance) {
+        mesh.visible = true;
+      } else if (distSq > (viewDistance * 2) * (viewDistance * 2)) {
+        // Too far — remove from scene and memory
+        scene.remove(mesh);
+        mesh.traverse(child => {
+          if (child.isMesh) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+        });
+        // Remove from array
+        this.spawnedTreeGroups = this.spawnedTreeGroups.filter(obj => obj.mesh !== mesh);
+      } else {
+        mesh.visible = false;
+      }
+      
     });
   }
 
   initSnowfall() {
     this.snowConfig = {
-      particleCount: 10000,
-      boxSize: 100, // Area size around player
+      particleCount: IS_MOBILE ? 500: 1000,
+      boxSize: IS_MOBILE ? 50 : 100, // Area size around player
       height: 50, // How high snow starts above player
       fallSpeed: 0.1, // Base fall speed
       driftSpeed: 0.1, // Sideways drifting
@@ -900,16 +959,24 @@ const world = new CANNON.World();
 world.defaultContactMaterial.contactEquationStiffness = 1e9;
 world.defaultContactMaterial.contactEquationRelaxation = 4;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const canvasContainer = document.getElementById("canvas-container");
+const canvas = document.getElementById("three-canvas");
+const renderer = new THREE.WebGLRenderer({
+  canvas: canvas,
+  antialias: true,
+});
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight, false);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+
+const stats = new Stats();
+stats.showPanel(0); // 0 = FPS, 1 = ms, 2 = memory
+document.body.appendChild(stats.dom);
 
 const camera = new THREE.PerspectiveCamera(
   75,
-  window.innerWidth / window.innerHeight,
+  canvas.clientWidth / canvas.clientHeight,
   0.1,
   100
 );
@@ -955,8 +1022,8 @@ var characterControls,
   guy,
   animationsMap = new Map(),
   body;
-
-  gLoader.load("./assets/snowtrees.glb", (gltf) => {
+var hasSpawnedTrees = false;
+  gLoader.load("./assets/snowytrees.glb", (gltf) => {
     gltf.scene.traverse((child) => {
       if (child.name.startsWith("tree00")) {
         const meshes = [];
@@ -978,7 +1045,7 @@ var characterControls,
     });
 
     level.planeMeshes.forEach((plane) => level.placeTreesOnPlane(plane));
-
+    hasSpawnedTrees = true;
   });
   
 gLoader.load("./assets/cyberian.glb", (gltf) => {
@@ -1030,6 +1097,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
 const clock = new THREE.Clock();
 const timeStep = 1 / 60;
 function animate() {
+  stats.begin()
   let deltaT = clock.getDelta();
   world.step(timeStep, deltaT);
   if (characterControls) {
@@ -1037,6 +1105,8 @@ function animate() {
     guy.position.copy(body.position);
     body.quaternion.copy(guy.quaternion);
     level.updatePlayerPlane(characterControls.model.position);
+    level.updateTreeCollisions(characterControls.model.position);
+    // level.updateTreeVisibility(characterControls.model.position);
     updateShadowPosition();
     updatePlayerFootsteps();
   }
@@ -1044,8 +1114,8 @@ function animate() {
   wind.update();
   footprintSystem.update(deltaT);
   level.updateSnowfall();
-  // level.update(clock.getElapsedTime());
   renderer.render(scene, camera);
+  stats.end();
   requestAnimationFrame(animate);
 }
 
@@ -1083,13 +1153,21 @@ THREE.DefaultLoadingManager.onLoad = () => {
   document.getElementById("loading").outerHTML = "";
   if (IS_MOBILE) {
     joystick = new Joystick();
+    document.body.classList.add("mobile");
+  } else {
+    document.body.classList.add("desktop");
   }
   animate();
 };
 
 function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const width = canvasContainer.clientWidth;
+  const height = canvasContainer.clientHeight;
+
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  renderer.setSize(width, height, false); // ⬅ prevents the canvas squish
 }
+
 window.addEventListener("resize", onWindowResize);

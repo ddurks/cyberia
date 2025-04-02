@@ -1,48 +1,108 @@
 html, body {
     margin: 0;
-    height: 100%;
-    background: #a8def0;
-}
-#loading {
+    padding: 0;
     width: 100%;
-    display: block;
-    position: absolute;
-    top: 40%;
-}
-#controls {
+    height: 100%;
+    overflow: hidden;
+    background-color: #ddeeff;
+  }
+  
+  /* Default full-screen layout for desktop */
+  body.desktop #canvas-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  /* On mobile, let canvas fill above HUD */
+  body.mobile {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  body.mobile #canvas-container {
+    flex: 1 1 auto;
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+  }
+  
+  #three-canvas {
     position: absolute;
     top: 0;
-    left: 10px;
-    z-index:100;
-}
-
-#joystickWrapper1 {
-    pointer-events: auto;
+    left: 0;
+    width: 100%;
+    height: 100%;
     display: block;
-    position: absolute;
-    bottom: 15%;
-    left:0;
-    right:0;
-    margin-left:auto;
-    margin-right:auto;
-    background-color: transparent;
-    width: 120px;
-    height: 120px;
-    z-index: 12;
-    touch-action: manipulation;
-}
-
-#joystickWrapper2 {
-    pointer-events: auto;
-    display: block;
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    left: auto;
-    background-color: transparent;
-    width: 50vw;
-    height: 140px;
-    z-index: 12;
-    touch-action: manipulation;
+    z-index: 0;
+  }
+  
+  /* Only show HUD on mobile */
+  body.desktop #hud-container {
     display: none;
-}
+  }
+  
+  body.mobile #hud-container {
+    position: relative;
+    width: 100%;
+    pointer-events: none;
+    z-index: 100;
+  }
+  
+  /* Bottom bar */
+  #hud-base {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  
+  #hud-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  
+  #joystickWrapper1 {
+    position: absolute;
+    width: 110px;
+    height: 110px;
+    pointer-events: auto;
+    /* Position it *relative to the HUD image* */
+    left: 68%; /* tweak this */
+    bottom: 42%; /* tweak this */
+    transform: translate(-50%, 50%);
+  }
+  
+  #left-controls {
+    position: absolute;
+    bottom: 30px;
+    left: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: auto;
+  }
+  
+  #left-controls img {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    user-select: none;
+  }
+
+  #loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    background: #ddeeff;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  
