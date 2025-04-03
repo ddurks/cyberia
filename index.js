@@ -61,9 +61,9 @@ export class Joystick {
       multitouch: true,
       maxNumberOfNipples: 2,
       mode: "static",
+      color: "transparent",
       restJoystick: true,
       shape: "circle",
-      color: 'red',
       position: { left: "auto", right: "0px", bottom: "0px" },
       dynamicPage: true,
     };
@@ -100,6 +100,7 @@ export class Joystick {
   }
 }
 
+const footBoneNames = ["footl", "footr"];
 export class CharacterControls {
   walkDirection = new THREE.Vector3();
   rotateAngle = new THREE.Vector3(0, 1, 0);
@@ -111,6 +112,9 @@ export class CharacterControls {
   oldPosition = null;
   walkStart = null;
   level = null;
+  joystick = null;
+  jumpRequested = false;
+  prevJumpRequested = false;
 
   constructor(
     model,
@@ -128,33 +132,40 @@ export class CharacterControls {
     this.orbitControl = orbitControl;
     this.camera = camera;
     this.level = level;
+
+    if (IS_MOBILE) {
+      this.setupMobileControls();
+    }
+
+    this.skinnedMesh = this.model.getObjectByProperty("type", "SkinnedMesh");
+    this.skeleton = this.skinnedMesh ? this.skinnedMesh.skeleton : null;
   }
 
-  update(delta, keysPressed, joystick, isMobile) {
+  update(delta, keysPressed) {
     const directionPressed = DIRECTIONS.some(
       (key) => keysPressed[key] === true
     );
-    const joystickPressed = joystick
-      ? JOY_DIRS.some((key) => joystick[key] > 0)
+    const joystickPressed = this.joystick
+      ? JOY_DIRS.some((key) => this.joystick[key] > 0)
       : false;
 
-    var play = this.currentAction;
-    if (keysPressed[SPACE] && !this.isJumping) {
-      play = "jump";
+    const jumpRequested = keysPressed[SPACE] || this.aPressed;
+
+    // trigger jump only once per press
+    if (jumpRequested && !this.prevJumpRequested && !this.isJumping) {
       this.isStartingJump = true;
-    } else if (this.isStartingJump) {
+    }
+
+    let play = this.currentAction;
+    if (this.isStartingJump) {
       play = "jump";
     } else if (directionPressed || joystickPressed) {
-      if (!this.isJumping) {
+      if (this.isJumping) {
+        play = "float";
+      } else {
         play = "run";
       }
-      this.applyMovement(
-        directionPressed,
-        joystickPressed,
-        keysPressed,
-        joystick,
-        isMobile
-      );
+      this.applyMovement(directionPressed, joystickPressed, keysPressed);
     } else {
       if (this.walkStart !== null) {
         this.walkStart = null;
@@ -163,14 +174,10 @@ export class CharacterControls {
       play = "idle";
     }
 
-    if (this.level.planeMeshes) {
-      this.adjustHeightFromTerrain();
-    }
-
     this.updateAnim(
       play,
       delta,
-      keysPressed[SPACE]
+      this.isStartingJump
         ? () => {
             body.velocity.y = 100;
             this.isStartingJump = false;
@@ -178,16 +185,14 @@ export class CharacterControls {
           }
         : undefined
     );
+    if (this.level.planeMeshes) {
+      this.adjustHeightFromTerrain();
+    }
     this.updateCameraTarget();
+    this.prevJumpRequested = jumpRequested;
   }
 
-  applyMovement(
-    directionPressed,
-    joystickPressed,
-    keysPressed,
-    joystick,
-    isMobile
-  ) {
+  applyMovement(directionPressed, joystickPressed, keysPressed) {
     if (this.walkStart === null) {
       this.walkStart = Date.now();
     }
@@ -197,8 +202,8 @@ export class CharacterControls {
       this.camera.position.z - this.model.position.z
     );
 
-    var directionOffset = isMobile
-      ? this.joyDirectionOffset(joystick)
+    var directionOffset = IS_MOBILE
+      ? this.joyDirectionOffset(this.joystick)
       : this.directionOffset(keysPressed);
 
     this.rotateQuarternion.setFromAxisAngle(
@@ -245,10 +250,57 @@ export class CharacterControls {
       );
       if (intersects.length > 0) {
         const targetY = intersects[0].point.y;
-        this.model.position.y += (targetY - this.model.position.y) * 0.25;
+        this.model.position.y += targetY - this.model.position.y;
         body.position.y = this.model.position.y;
       }
+      this.stickFeetToTerrain();
     }
+  }
+
+  stickFeetToTerrain() {
+    const tempVec = new THREE.Vector3();
+    const tempQuatParentInv = new THREE.Quaternion();
+    const playerForward = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(this.model.quaternion)
+      .normalize();
+
+    footBoneNames.forEach((boneName) => {
+      const bone = this.skeleton.getBoneByName(boneName);
+      if (!bone) return;
+
+      bone.getWorldPosition(tempVec);
+
+      raycaster.set(tempVec, downVector);
+      const hit = raycaster.intersectObjects(this.level.planeMeshes, true)[0];
+      if (!hit) return;
+
+      const groundNormal = hit.face.normal
+        .clone()
+        .transformDirection(hit.object.matrixWorld)
+        .normalize();
+
+      const yAxis = playerForward
+        .clone()
+        .projectOnPlane(groundNormal)
+        .normalize(); // toes
+      const xAxis = groundNormal.clone(); // foot bottom
+      const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize(); // side of foot
+
+      // Re-orthogonalize forward axis
+      yAxis.crossVectors(zAxis, xAxis).normalize();
+
+      // Detect mirrored bone and flip Z if needed
+      const isRightFoot = bone.name.toLowerCase().includes("r");
+      const xFinal = isRightFoot ? xAxis.clone().negate() : xAxis;
+      const zFinal = isRightFoot ? zAxis.clone().negate() : zAxis;
+      const mat = new THREE.Matrix4().makeBasis(xFinal, yAxis, zFinal);
+      const worldQuat = new THREE.Quaternion().setFromRotationMatrix(mat);
+
+      bone.parent.getWorldQuaternion(tempQuatParentInv).invert();
+      const localQuat = worldQuat.clone().premultiply(tempQuatParentInv);
+
+      bone.quaternion.slerp(localQuat, 0.3);
+    });
   }
 
   updateAnim(play, delta, onComplete) {
@@ -332,18 +384,55 @@ export class CharacterControls {
     return directionOffset;
   }
 
+  setupMobileControls() {
+    this.joystick = new Joystick();
+
+    const buttonsConfig = {
+      a: "cyberia_abutton",
+      b: "cyberia_bbutton",
+    };
+
+    this.buttons = {};
+    this.aPressed = false;
+    this.bPressed = false;
+
+    Object.entries(buttonsConfig).forEach(([key, baseName]) => {
+      const el = document.getElementById(`button-${key}`);
+      this.buttons[key] = el;
+
+      el.addEventListener("touchstart", () => {
+        el.src = `assets/hud/${baseName}_pressed.png`;
+        this[`${key}Pressed`] = true;
+      });
+
+      el.addEventListener("touchend", () => {
+        el.src = `assets/hud/${baseName}.png`;
+        this[`${key}Pressed`] = false;
+      });
+
+      el.addEventListener("mousedown", () => {
+        el.src = `assets/hud/${baseName}_pressed.png`;
+        this[`${key}Pressed`] = true;
+      });
+      el.addEventListener("mouseup", () => {
+        el.src = `assets/hud/${baseName}.png`;
+        this[`${key}Pressed`] = false;
+      });
+    });
+  }
+
   joyDirectionOffset(joystick) {
     var directionOffset = 0; // w
 
-    if (joystick.forward > 0) {
-      if (joystick.right > 0.25) {
-        if (joystick.right > 0.75) {
+    if (this.joystick.forward > 0) {
+      if (this.joystick.right > 0.25) {
+        if (this.joystick.right > 0.75) {
           directionOffset = -Math.PI / 2; // d
         } else {
           directionOffset = -Math.PI / 4 - Math.PI / 2; // s+d
         }
-      } else if (joystick.left > 0.25) {
-        if (joystick.left > 0.75) {
+      } else if (this.joystick.left > 0.25) {
+        if (this.joystick.left > 0.75) {
           directionOffset = Math.PI / 2; // a
         } else {
           directionOffset = Math.PI / 4 + Math.PI / 2; // s+a
@@ -352,15 +441,15 @@ export class CharacterControls {
         directionOffset = Math.PI; // s
       }
     }
-    if (joystick.backward > 0) {
-      if (joystick.right > 0.25) {
-        if (joystick.right > 0.75) {
+    if (this.joystick.backward > 0) {
+      if (this.joystick.right > 0.25) {
+        if (this.joystick.right > 0.75) {
           directionOffset = -Math.PI / 2; // d
         } else {
           directionOffset = -Math.PI / 4; // w+d
         }
-      } else if (joystick.left > 0.25) {
-        if (joystick.left > 0.75) {
+      } else if (this.joystick.left > 0.25) {
+        if (this.joystick.left > 0.75) {
           directionOffset = Math.PI / 2; // a
         } else {
           directionOffset = Math.PI / 4; // w+a
@@ -381,7 +470,7 @@ class FootprintSystem {
 
     this.footprintTexture = this.createFootprintTexture();
     this.footprintTexture.needsUpdate = true;
-    this.footprintTexture.generateMipmaps = false; // ✅ disable if you're not using mipmaps
+    this.footprintTexture.generateMipmaps = false;
     this.footprintTexture.minFilter = THREE.LinearFilter;
     this.footprintTexture.magFilter = THREE.LinearFilter;
   }
@@ -446,7 +535,7 @@ class FootprintSystem {
       transparent: true,
       opacity: 1,
       depthWrite: false,
-      blending: THREE.NormalBlending, // or AdditiveBlending for glow
+      blending: THREE.NormalBlending,
       side: THREE.DoubleSide,
     });
 
@@ -455,18 +544,18 @@ class FootprintSystem {
       footprintMaterial
     );
 
-    // Orient the footprint to match the ground normal (lays it flat on the ground)
+    // orient the footprint to match the ground normal (lays it flat on the ground)
     const up = new THREE.Vector3(0, 1, 0);
     const alignQuat = new THREE.Quaternion().setFromUnitVectors(up, normal);
     footprint.quaternion.copy(alignQuat);
 
-    // Now rotate around the normal to face the movement direction
+    // rotate around the normal to face the movement direction
     const angle = Math.atan2(playerDirection.x, playerDirection.z);
     const normalAxis = normal.clone().normalize();
     const spinQuat = new THREE.Quaternion().setFromAxisAngle(normalAxis, angle);
     footprint.quaternion.premultiply(spinQuat);
 
-    // FINAL: Small tilt around right axis in ground plane to lie footprint down
+    // small tilt around right axis in ground plane to lie footprint down
     const forwardDir = playerDirection
       .clone()
       .projectOnPlane(normal)
@@ -475,7 +564,7 @@ class FootprintSystem {
       .crossVectors(normal, forwardDir)
       .normalize();
 
-    // Tilt the footprint by 90 degrees around the "right" axis to lay it flat
+    // tilt the footprint by 90 degrees around the "right" axis to lay it flat
     const tiltQuat = new THREE.Quaternion().setFromAxisAngle(
       rightDir,
       Math.PI / 2
@@ -495,7 +584,7 @@ class FootprintSystem {
       const fp = this.footprints[i];
       fp.life -= delta * 0.25;
       fp.mesh.material.opacity = fp.life;
-      fp.mesh.material.needsUpdate = true; // 🛠️ Force update for opacity to take effect
+      fp.mesh.material.needsUpdate = true;
 
       if (fp.life <= 0) {
         this.scene.remove(fp.mesh);
@@ -509,27 +598,24 @@ class FootprintSystem {
 
 export class WindSystem {
   constructor() {
-    this.angle = Math.random() * Math.PI * 2; // Wind starts in random direction
-    this.speed = 0.05 + Math.random() * 0.05; // Random starting wind speed
-    this.gustIntensity = 0.5; // Base fluctuation amount
-    this.angleVariation = 0.005; // Small adjustments per frame
-    this.speedVariation = 0.005; // How much wind speed oscillates
+    this.angle = Math.random() * Math.PI * 2;
+    this.speed = 0.05 + Math.random() * 0.05;
+    this.gustIntensity = 0.5;
+    this.angleVariation = 0.005;
+    this.speedVariation = 0.005;
     this.minSpeed = 0.02;
     this.maxSpeed = 0.5;
   }
 
   update() {
-    // Smoothly vary wind direction
     this.angle += (Math.random() - 0.5) * this.angleVariation;
 
-    // Simulate gusts by making wind speeds oscillate up and down
     this.speed += (Math.random() - 0.5) * this.speedVariation;
     this.speed = Math.max(this.minSpeed, Math.min(this.speed, this.maxSpeed));
 
-    // Calculate final wind vector
     this.windVector = new THREE.Vector3(
       Math.cos(this.angle) * this.speed,
-      0, // No vertical wind force
+      0,
       Math.sin(this.angle) * this.speed
     );
   }
@@ -545,9 +631,9 @@ export class Level {
   currentPlayerRoomZ = 0;
   planeSize = 100;
   planeMeshes = [];
-  treeTypes = {};     // Holds tree { geometry, material }
-  treeMeshes = {};    // Holds InstancedMesh for each tree type
-  treeInstanceCounters = {}; // Track current count per type
+  treeTypes = {};
+  treeMeshes = {};
+  treeInstanceCounters = {};
   treeCollisionData = [];
   activeTreeBodies = [];
   spawnedTreeGroups = [];
@@ -567,12 +653,12 @@ export class Level {
   }
 
   light() {
-    // 🌤️ Warm this.sunLight (Directional Light)
+    // warm this.sunLight (Directional Light)
     this.sunLight = new THREE.DirectionalLight(0xffffff, 0.75); // Soft warm this.sunLight
     this.sunLight.position.set(-60, 100, 100);
     this.sunLight.castShadow = true;
 
-    // Shadow adjustments for softer, more natural shadows
+    // shadow adjustments for softer, more natural shadows
     this.sunLight.shadow.camera.top = 50;
     this.sunLight.shadow.camera.bottom = -50;
     this.sunLight.shadow.camera.left = -50;
@@ -582,41 +668,31 @@ export class Level {
     this.sunLight.shadow.mapSize.width = 4096;
     this.sunLight.shadow.mapSize.height = 4096;
 
-    // Softer shadows with more realistic diffusion
+    // softer shadows with more realistic diffusion
     this.sunLight.shadow.radius = 4;
     this.sunLight.shadow.bias = -0.0001;
 
     scene.add(this.sunLight);
 
-    // ❄️ Cool Ambient Light for Snow Contrast
-    const ambientLight = new THREE.AmbientLight(0xE3F2FD, 0.4); // Cold blue tone
+    // Cool Ambient Light for Snow Contrast
+    const ambientLight = new THREE.AmbientLight(0xe3f2fd, 0.4); // Cold blue tone
     scene.add(ambientLight);
-
-    // 🌊 Subtle Bounce Light (Reflects off snow)
-    // const bounceLight = new THREE.DirectionalLight(0xb0e0ff, 0.2);
-    // bounceLight.position.set(0, -50, 0); // Mimic light bouncing off the snow
-    // scene.add(bounceLight);
   }
 
-  // Calculate the adjusted global position for proper edge alignment with blending
   calculateHeight(x, z, localX, localZ, width) {
-    // Constants for smooth hills
     const frequency = 0.1;
     const amplitude = 0.75;
-    const edgeBlendWidth = 3; // Number of vertices from each edge where blending occurs
+    const edgeBlendWidth = 3;
 
-    // Calculate distance to nearest edge
     const edgeDistanceX = Math.min(localX, width - localX);
     const edgeDistanceZ = Math.min(localZ, width - localZ);
     const edgeDistance = Math.min(edgeDistanceX, edgeDistanceZ);
 
-    // Determine blend factor (1 at center, 0 at edge)
     const blendFactor = Math.max(
       0,
       (edgeDistance - edgeBlendWidth) / edgeBlendWidth
     );
 
-    // Inner vertices use the sinusoidal function for height, modulated by the blend factor
     return (
       amplitude *
       Math.sin(frequency * x) *
@@ -636,7 +712,7 @@ export class Level {
 
     // Access and modify vertex positions
     let positions = geometry.attributes.position.array;
-    let width = Math.sqrt(positions.length / 3) - 1; // Number of vertices on one side of the square
+    let width = Math.sqrt(positions.length / 3) - 1;
 
     for (let i = 0, j = 0; i < positions.length; i += 3, j++) {
       const x = positions[i];
@@ -660,7 +736,7 @@ export class Level {
 
     [albedoMap, normalMap, roughnessMap].forEach((map) => {
       map.wrapS = map.wrapT = THREE.RepeatWrapping;
-      map.repeat.set(1, 1); // Adjust tiling as needed
+      map.repeat.set(1, 1);
     });
 
     const material = new THREE.MeshStandardMaterial({
@@ -686,7 +762,7 @@ export class Level {
       const newPlane = this.createPlane(
         x * this.planeSize,
         0,
-        z * this.planeSize,
+        z * this.planeSize
       );
       this.spawnedPlanes.add(key);
       this.planeMeshes.push(newPlane);
@@ -694,12 +770,11 @@ export class Level {
     }
   }
 
-
   updatePlayerPlane(playerPosition) {
     let newRoomX = Math.floor(playerPosition.x / this.planeSize);
     let newRoomZ = Math.floor(playerPosition.z / this.planeSize);
 
-    // Check if player has entered a new room
+    // Check if player has entered a new segment
     if (
       newRoomX !== this.currentPlayerRoomX ||
       newRoomZ !== this.currentPlayerRoomZ
@@ -721,49 +796,55 @@ export class Level {
   }
 
   placeTreesOnPlane(plane) {
-    plane.updateMatrixWorld(true); // Make sure transforms are up to date
-  
+    plane.updateMatrixWorld(true);
+
     const keys = Object.keys(this.treeTypes);
     if (!keys.length) return;
-  
-    const numTrees = 100+ Math.floor(Math.random() * 100);
-  
+
+    const numTrees = 100 + Math.floor(Math.random() * 100);
+
     for (let i = 0; i < numTrees; i++) {
       const localX = (Math.random() - 0.5) * this.planeSize;
       const localZ = (Math.random() - 0.5) * this.planeSize;
-  
+
       const localPosition = new THREE.Vector3(localX, 0, localZ);
       const worldPosition = localPosition.applyMatrix4(plane.matrixWorld);
-  
-      raycaster.set(worldPosition.clone().add(new THREE.Vector3(0, 100, 0)), downVector);
+
+      raycaster.set(
+        worldPosition.clone().add(new THREE.Vector3(0, 100, 0)),
+        downVector
+      );
       const intersects = raycaster.intersectObject(plane, true);
       if (intersects.length === 0) continue;
-  
+
       const { point, face } = intersects[0];
       const normal = face.normal.clone().normalize();
-  
+
       // Random tree type
       const treeName = keys[Math.floor(Math.random() * keys.length)];
       const parts = this.treeTypes[treeName];
-  
+
       const treeGroup = new THREE.Group();
-  
+
       parts.forEach((part) => {
         const mesh = new THREE.Mesh(part.geometry, part.material.clone());
         mesh.castShadow = IS_MOBILE ? false : true;
-        mesh.receiveShadow =  IS_MOBILE ? false : true;
+        mesh.receiveShadow = IS_MOBILE ? false : true;
         treeGroup.add(mesh);
       });
-  
+
       // Align to ground normal and spin
       const up = new THREE.Vector3(0, 1, 0);
       const alignQuat = new THREE.Quaternion().setFromUnitVectors(up, normal);
       const rotationY = Math.random() * Math.PI * 2;
-      const spinQuat = new THREE.Quaternion().setFromAxisAngle(normal, rotationY);
-  
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+        normal,
+        rotationY
+      );
+
       treeGroup.quaternion.copy(alignQuat);
       treeGroup.quaternion.premultiply(spinQuat);
-  
+
       const scale = 1 + Math.random();
       treeGroup.scale.setScalar(scale);
       const snowDepth = 0.15;
@@ -772,7 +853,7 @@ export class Level {
 
       this.spawnedTreeGroups.push({
         mesh: treeGroup,
-        position: treeGroup.position.clone()
+        position: treeGroup.position.clone(),
       });
 
       const bbox = new THREE.Box3().setFromObject(treeGroup);
@@ -784,16 +865,21 @@ export class Level {
         radius,
         height,
       });
-    } 
+    }
   }
 
   updateTreeCollisions(playerPosition, activationRadius = 20) {
     this.treeCollisionData.forEach((data) => {
       if (!data || !data.position) return;
-  
+
       const distance = playerPosition.distanceTo(data.position);
       if (distance < activationRadius && !data.body) {
-        const shape = new CANNON.Cylinder(data.radius, data.radius, data.height, 8);
+        const shape = new CANNON.Cylinder(
+          data.radius,
+          data.radius,
+          data.height,
+          8
+        );
         const body = new CANNON.Body({
           mass: 0,
           shape: shape,
@@ -809,57 +895,34 @@ export class Level {
           data.quaternion.z,
           data.quaternion.w
         );
-  
+
         data.body = body;
         world.addBody(body);
       }
     });
   }
 
-  updateTreeVisibility(playerPosition, viewDistance = 100) {
-    this.spawnedTreeGroups.forEach(({ mesh, position }) => {
-      const distSq = playerPosition.distanceToSquared(position);
-      if (distSq < viewDistance * viewDistance) {
-        mesh.visible = true;
-      } else if (distSq > (viewDistance * 2) * (viewDistance * 2)) {
-        // Too far — remove from scene and memory
-        scene.remove(mesh);
-        mesh.traverse(child => {
-          if (child.isMesh) {
-            child.geometry.dispose();
-            child.material.dispose();
-          }
-        });
-        // Remove from array
-        this.spawnedTreeGroups = this.spawnedTreeGroups.filter(obj => obj.mesh !== mesh);
-      } else {
-        mesh.visible = false;
-      }
-      
-    });
-  }
-
   initSnowfall() {
     this.snowConfig = {
-      particleCount: IS_MOBILE ? 500: 1000,
-      boxSize: IS_MOBILE ? 50 : 100, // Area size around player
-      height: 50, // How high snow starts above player
-      fallSpeed: 0.1, // Base fall speed
-      driftSpeed: 0.1, // Sideways drifting
+      particleCount: IS_MOBILE ? 500 : 1000,
+      boxSize: IS_MOBILE ? 50 : 100,
+      height: 50,
+      fallSpeed: 0.1,
+      driftSpeed: 0.1,
     };
 
     this.snowGeometry = new THREE.BufferGeometry();
     this.snowPositions = new Float32Array(this.snowConfig.particleCount * 3);
     this.snowVelocities = new Float32Array(this.snowConfig.particleCount * 3);
-    this.windAngle = Math.random() * Math.PI * 2; // Set initial wind direction
-    this.windSpeed = 0.1; // Base wind strength
+    this.windAngle = Math.random() * Math.PI * 2;
+    this.windSpeed = 0.1;
     this.windVariation = 0.02;
-    this.windSpeedVariation = 0.5; // How much the wind speed fluctuates
-    this.windSpeedMin = 0.5; // Minimum wind speed
+    this.windSpeedVariation = 0.5;
+    this.windSpeedMin = 0.5;
     this.windSpeedMax = 0.1;
 
     for (let i = 0; i < this.snowConfig.particleCount; i++) {
-      this.resetSnowflake(i, true); // Initialize snowflakes in the air
+      this.resetSnowflake(i, true);
     }
 
     this.snowGeometry.setAttribute(
@@ -869,14 +932,14 @@ export class Level {
 
     this.snowMaterial = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.8, // Smaller flakes
+      size: 0.8,
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
       map: this.generateSnowflakeTexture(),
     });
     this.snowParticles = new THREE.Points(this.snowGeometry, this.snowMaterial);
-    this.snowParticles.frustumCulled = false; // Prevents disappearing at angles
+    this.snowParticles.frustumCulled = false;
 
     scene.add(this.snowParticles);
   }
@@ -898,7 +961,6 @@ export class Level {
       positions[index + 1] -= this.snowConfig.fallSpeed;
       positions[index + 2] += windForce.z;
 
-      // Reset snowflake if it falls below player view
       if (positions[index + 1] < playerPos.y - 10) {
         this.resetSnowflake(i, false);
       }
@@ -922,7 +984,7 @@ export class Level {
   }
 
   generateSnowflakeTexture() {
-    const size = 64; // Texture resolution
+    const size = 64;
     const canvas = document.createElement("canvas");
     canvas.width = size;
     canvas.height = size;
@@ -930,7 +992,6 @@ export class Level {
 
     ctx.clearRect(0, 0, size, size);
 
-    // Draw soft circular snowflake
     const gradient = ctx.createRadialGradient(
       size / 2,
       size / 2,
@@ -966,21 +1027,25 @@ const renderer = new THREE.WebGLRenderer({
   antialias: true,
 });
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight, false);
+renderer.setSize(
+  canvasContainer.clientWidth,
+  canvasContainer.clientHeight,
+  false
+);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 
 const stats = new Stats();
-stats.showPanel(0); // 0 = FPS, 1 = ms, 2 = memory
+stats.showPanel(0);
 document.body.appendChild(stats.dom);
 
 const camera = new THREE.PerspectiveCamera(
-  75,
+  50,
   canvas.clientWidth / canvas.clientHeight,
   0.1,
   100
 );
-camera.position.set(0, 50, 100);
+camera.position.set(0, 2, 5);
 
 const solver = new CANNON.GSSolver();
 solver.iterations = 7;
@@ -1004,7 +1069,7 @@ scene.background = new THREE.Color(fogColor);
 
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
-orbitControls.minDistance = 5;
+orbitControls.minDistance = 3;
 orbitControls.maxDistance = 15;
 orbitControls.enablePan = false;
 orbitControls.maxPolarAngle = Math.PI / 2 - 0.05;
@@ -1023,31 +1088,31 @@ var characterControls,
   animationsMap = new Map(),
   body;
 var hasSpawnedTrees = false;
-  gLoader.load("./assets/snowytrees.glb", (gltf) => {
-    gltf.scene.traverse((child) => {
-      if (child.name.startsWith("tree00")) {
-        const meshes = [];
-  
-        child.traverse((sub) => {
-          if (sub.isMesh) {
-            meshes.push(sub);
-          }
-        });
-  
-        if (meshes.length === 0) return;
-  
-        level.treeTypes[child.name] = meshes.map((mesh) => ({
-          geometry: mesh.geometry.clone(),
-          material: mesh.material.clone(),
-          name: mesh.name,
-        }));
-      }
-    });
+gLoader.load("./assets/snowytrees.glb", (gltf) => {
+  gltf.scene.traverse((child) => {
+    if (child.name.startsWith("tree00")) {
+      const meshes = [];
 
-    level.planeMeshes.forEach((plane) => level.placeTreesOnPlane(plane));
-    hasSpawnedTrees = true;
+      child.traverse((sub) => {
+        if (sub.isMesh) {
+          meshes.push(sub);
+        }
+      });
+
+      if (meshes.length === 0) return;
+
+      level.treeTypes[child.name] = meshes.map((mesh) => ({
+        geometry: mesh.geometry.clone(),
+        material: mesh.material.clone(),
+        name: mesh.name,
+      }));
+    }
   });
-  
+
+  level.planeMeshes.forEach((plane) => level.placeTreesOnPlane(plane));
+  hasSpawnedTrees = true;
+});
+
 gLoader.load("./assets/cyberian.glb", (gltf) => {
   gltf.scene.traverse(function (object) {
     if (object.isMesh) object.castShadow = true;
@@ -1076,6 +1141,15 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   body.linearDamping = 0.999;
   world.addBody(body);
 
+  gltf.animations.forEach((clip) => {
+    clip.tracks = clip.tracks.filter((track) => {
+      // Only keep tracks that are not rotating foot/toe bones
+      return !footBoneNames.some((name) =>
+        track.name.endsWith(`${name}.quaternion`)
+      );
+    });
+  });
+
   const mixer = new THREE.AnimationMixer(guy);
   gltf.animations.forEach((a) => {
     animationsMap.set(a.name, mixer.clipAction(a));
@@ -1097,16 +1171,15 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
 const clock = new THREE.Clock();
 const timeStep = 1 / 60;
 function animate() {
-  stats.begin()
+  stats.begin();
   let deltaT = clock.getDelta();
   world.step(timeStep, deltaT);
   if (characterControls) {
-    characterControls.update(deltaT, keysPressed, joystick, IS_MOBILE);
+    characterControls.update(deltaT, keysPressed);
     guy.position.copy(body.position);
     body.quaternion.copy(guy.quaternion);
     level.updatePlayerPlane(characterControls.model.position);
     level.updateTreeCollisions(characterControls.model.position);
-    // level.updateTreeVisibility(characterControls.model.position);
     updateShadowPosition();
     updatePlayerFootsteps();
   }
@@ -1120,7 +1193,7 @@ function animate() {
 }
 
 function updateShadowPosition() {
-  const playerPos = guy.position; // Or use the player's actual position
+  const playerPos = guy.position;
 
   level.sunLight.position.set(
     playerPos.x - 60,
@@ -1148,16 +1221,19 @@ function updatePlayerFootsteps() {
   }
 }
 
-var joystick;
 THREE.DefaultLoadingManager.onLoad = () => {
-  document.getElementById("loading").outerHTML = "";
-  if (IS_MOBILE) {
-    joystick = new Joystick();
-    document.body.classList.add("mobile");
+  const loading = document.getElementById("loading");
+  const loadingBG = document.getElementById("loading-bg");
+  if (loading && loadingBG) {
+    loading.src = "assets/cyberia_loading_complete.gif";
+    setTimeout(() => {
+      loading.outerHTML = "";
+      loadingBG.outerHTML = "";
+      animate();
+    }, 1250);
   } else {
-    document.body.classList.add("desktop");
+    animate();
   }
-  animate();
 };
 
 function onWindowResize() {
@@ -1167,7 +1243,7 @@ function onWindowResize() {
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
 
-  renderer.setSize(width, height, false); // ⬅ prevents the canvas squish
+  renderer.setSize(width, height, false);
 }
 
 window.addEventListener("resize", onWindowResize);
