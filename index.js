@@ -57,7 +57,7 @@ export class Joystick {
   constructor() {
     const options = {
       zone: document.getElementById("joystickWrapper1"),
-      size: window.innerWidth / 3,
+      size: window.innerWidth / 4,
       multitouch: true,
       maxNumberOfNipples: 2,
       mode: "static",

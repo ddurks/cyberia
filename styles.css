@@ -106,8 +106,8 @@ body.mobile #hud-container {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 300px;
-  height: 300px;
+  width: 245px;
+  height: 245px;
   transform: translate(-50%, -50%);
   background-image: url('assets/hud/cyberia_joystick.png');
   background-size: contain;
