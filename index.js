@@ -461,18 +461,116 @@ export class CharacterControls {
   }
 }
 
+class SnowPuffSystem {
+  constructor(groundObjects) {
+    this.groundObjects = groundObjects;
+    this.texture = this.createPuffTexture();
+
+    this.pool = [];
+    this.active = [];
+    this.maxPuffs = 60;
+
+    for (let i = 0; i < this.maxPuffs; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: this.texture,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const puff = new THREE.Sprite(mat);
+      puff.visible = false;
+      scene.add(puff);
+      this.pool.push(puff);
+    }
+  }
+
+  createPuffTexture() {
+    const size = 64;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    const gradient = ctx.createRadialGradient(
+      size / 2,
+      size / 2,
+      0,
+      size / 2,
+      size / 2,
+      size / 2
+    );
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0.8)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  spawnPuff(position) {
+    const puff = this.pool.pop();
+    if (!puff) return;
+
+    puff.visible = true;
+    puff.position.copy(position);
+    puff.scale.setScalar(0.4 + Math.random() * 0.4);
+    puff.material.opacity = 1;
+    puff.life = 1;
+    this.active.push(puff);
+  }
+
+  update(delta = 0.016) {
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const puff = this.active[i];
+      puff.life -= delta * 0.5;
+      puff.material.opacity = puff.life;
+      puff.position.y += delta * 0.2;
+
+      if (puff.life <= 0) {
+        puff.visible = false;
+        puff.material.opacity = 0;
+        this.active.splice(i, 1);
+        this.pool.push(puff);
+      }
+    }
+  }
+}
+
 class FootprintSystem {
-  constructor(scene, groundObjects) {
-    this.scene = scene;
+  constructor(groundObjects, snowPuffSystem) {
     this.groundObjects = groundObjects;
     this.footprints = [];
     this.lastFoot = "right";
+    this.snowPuffSystem = snowPuffSystem;
 
     this.footprintTexture = this.createFootprintTexture();
     this.footprintTexture.needsUpdate = true;
     this.footprintTexture.generateMipmaps = false;
     this.footprintTexture.minFilter = THREE.LinearFilter;
     this.footprintTexture.magFilter = THREE.LinearFilter;
+
+    this.footprintPool = [];
+    this.maxFootprints = 100;
+
+    for (let i = 0; i < this.maxFootprints; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.4, 0.6),
+        new THREE.MeshBasicMaterial({
+          map: this.footprintTexture,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+          side: THREE.DoubleSide,
+        })
+      );
+      mesh.visible = false;
+      scene.add(mesh);
+      this.footprintPool.push(mesh);
+    }
   }
 
   createFootprintTexture() {
@@ -539,21 +637,22 @@ class FootprintSystem {
       side: THREE.DoubleSide,
     });
 
-    const footprint = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.4, 0.6),
-      footprintMaterial
-    );
+    const mesh = this.footprintPool.pop();
+    if (!mesh) return;
+
+    mesh.material.opacity = 1;
+    mesh.visible = true;
 
     // orient the footprint to match the ground normal (lays it flat on the ground)
     const up = new THREE.Vector3(0, 1, 0);
     const alignQuat = new THREE.Quaternion().setFromUnitVectors(up, normal);
-    footprint.quaternion.copy(alignQuat);
+    mesh.quaternion.copy(alignQuat);
 
     // rotate around the normal to face the movement direction
     const angle = Math.atan2(playerDirection.x, playerDirection.z);
     const normalAxis = normal.clone().normalize();
     const spinQuat = new THREE.Quaternion().setFromAxisAngle(normalAxis, angle);
-    footprint.quaternion.premultiply(spinQuat);
+    mesh.quaternion.premultiply(spinQuat);
 
     // small tilt around right axis in ground plane to lie footprint down
     const forwardDir = playerDirection
@@ -569,12 +668,17 @@ class FootprintSystem {
       rightDir,
       Math.PI / 2
     );
-    footprint.quaternion.premultiply(tiltQuat);
 
-    footprint.position.copy(point).add(normal.clone().multiplyScalar(0.1));
+    mesh.quaternion.copy(alignQuat);
+    mesh.quaternion.premultiply(spinQuat);
+    mesh.quaternion.premultiply(tiltQuat);
+    mesh.position.copy(point).add(normal.clone().multiplyScalar(0.1));
 
-    this.scene.add(footprint);
-    this.footprints.push({ mesh: footprint, life: 1.0 });
+    this.footprints.push({ mesh, life: 1.0 });
+
+    if (this.snowPuffSystem) {
+      this.snowPuffSystem.spawnPuff(point, playerDirection);
+    }
 
     this.lastFoot = this.lastFoot === "right" ? "left" : "right";
   }
@@ -587,12 +691,12 @@ class FootprintSystem {
       fp.mesh.material.needsUpdate = true;
 
       if (fp.life <= 0) {
-        this.scene.remove(fp.mesh);
-        fp.mesh.geometry.dispose();
-        fp.mesh.material.dispose();
+        fp.mesh.visible = false;
+        this.footprintPool.push(fp.mesh);
         this.footprints.splice(i, 1);
       }
     }
+    snowPuffSystem.update(delta);
   }
 }
 
@@ -637,6 +741,9 @@ export class Level {
   treeCollisionData = [];
   activeTreeBodies = [];
   spawnedTreeGroups = [];
+  transparentObstructions = new Set();
+  allObstructables = new Set();
+  activeObstructables = new Set();
 
   constructor() {
     this.light();
@@ -645,7 +752,7 @@ export class Level {
     for (let i = -1; i <= 1; i++) {
       for (let j = -1; j <= 1; j++) {
         if (i !== 0 || j !== 0) {
-          this.checkAndSpawnPlane(i * this.planeSize, j * this.planeSize);
+          this.checkAndSpawnPlane(i, j);
         }
       }
     }
@@ -654,7 +761,7 @@ export class Level {
 
   light() {
     // warm this.sunLight (Directional Light)
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.75); // Soft warm this.sunLight
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.7); // Soft warm this.sunLight
     this.sunLight.position.set(-60, 100, 100);
     this.sunLight.castShadow = true;
 
@@ -748,6 +855,7 @@ export class Level {
     const plane = new THREE.Mesh(geometry, material);
     plane.position.set(x, y, z);
     plane.receiveShadow = true;
+    plane.visible = true;
     scene.add(plane);
     return plane;
   }
@@ -759,14 +867,20 @@ export class Level {
   checkAndSpawnPlane(x, z) {
     let key = this.planeKey(x, z);
     if (!this.spawnedPlanes.has(key)) {
-      const newPlane = this.createPlane(
-        x * this.planeSize,
-        0,
-        z * this.planeSize
-      );
+      const mesh = this.createPlane(x * this.planeSize, 0, z * this.planeSize);
+
+      const planeData = {
+        gridX: x,
+        gridZ: z,
+        mesh,
+        objects: [],
+        isVisible: true,
+      };
+
       this.spawnedPlanes.add(key);
-      this.planeMeshes.push(newPlane);
-      this.placeTreesOnPlane(newPlane);
+      this.planeMeshes.push(mesh);
+      const trees = this.placeTreesOnPlane(mesh);
+      if (trees) planeData.objects.push(...trees);
     }
   }
 
@@ -789,17 +903,18 @@ export class Level {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         if (dx !== 0 || dz !== 0) {
-          this.checkAndSpawnPlane(x + dx, z + dz, this.planeSize);
+          this.checkAndSpawnPlane(x + dx, z + dz);
         }
       }
     }
   }
 
   placeTreesOnPlane(plane) {
+    const placedTrees = [];
     plane.updateMatrixWorld(true);
 
     const keys = Object.keys(this.treeTypes);
-    if (!keys.length) return;
+    if (!keys.length) return placedTrees;
 
     const numTrees = 100 + Math.floor(Math.random() * 100);
 
@@ -830,7 +945,10 @@ export class Level {
         const mesh = new THREE.Mesh(part.geometry, part.material.clone());
         mesh.castShadow = IS_MOBILE ? false : true;
         mesh.receiveShadow = IS_MOBILE ? false : true;
+        mesh.userData.isObstructable = true;
+        mesh.material.transparent = true;
         treeGroup.add(mesh);
+        this.allObstructables.add(mesh);
       });
 
       // Align to ground normal and spin
@@ -855,6 +973,7 @@ export class Level {
         mesh: treeGroup,
         position: treeGroup.position.clone(),
       });
+      placedTrees.push(treeGroup);
 
       const bbox = new THREE.Box3().setFromObject(treeGroup);
       const height = bbox.max.y - bbox.min.y;
@@ -866,6 +985,8 @@ export class Level {
         height,
       });
     }
+
+    return placedTrees;
   }
 
   updateTreeCollisions(playerPosition, activationRadius = 20) {
@@ -889,6 +1010,9 @@ export class Level {
             data.position.z
           ),
         });
+        body.allowSleep = true;
+        body.sleepSpeedLimit = 0.1;
+        body.sleepTimeLimit = 1.0;
         body.quaternion.set(
           data.quaternion.x,
           data.quaternion.y,
@@ -900,6 +1024,73 @@ export class Level {
         world.addBody(body);
       }
     });
+  }
+
+  handleCameraObstruction(camera, characterControls) {
+    if (!characterControls) return;
+
+    this.transparentObstructions.forEach((obj) => {
+      if (obj.material && obj.userData.originalOpacity !== undefined) {
+        obj.material.opacity = obj.userData.originalOpacity;
+        obj.material.transparent = obj.userData.originalTransparent;
+      }
+    });
+    this.transparentObstructions.clear();
+
+    const cameraPos = camera.position.clone();
+    const playerPos = characterControls.model.position
+      .clone()
+      .add(new THREE.Vector3(0, 1, 0));
+
+    const direction = playerPos.clone().sub(cameraPos);
+    const distance = direction.length();
+    direction.normalize();
+
+    obstructionRaycaster.set(cameraPos, direction);
+    obstructionRaycaster.far = distance;
+
+    const intersects = obstructionRaycaster.intersectObjects(
+      Array.from(this.activeObstructables),
+      true
+    );
+
+    for (let i = 0; i < intersects.length; i++) {
+      const obj = intersects[i].object;
+
+      if (
+        obj === characterControls.model ||
+        characterControls.model.children.includes(obj)
+      )
+        break;
+      if (!obj.isMesh || !obj.userData.isObstructable) continue;
+
+      if (obj.userData.originalOpacity === undefined) {
+        obj.userData.originalOpacity = obj.material.opacity;
+        obj.userData.originalTransparent = obj.material.transparent;
+      }
+
+      obj.material.opacity = 0.3;
+      obj.material.transparent = true;
+
+      this.transparentObstructions.add(obj);
+    }
+  }
+
+  updateActiveObstructables(playerPosition, radius = 20) {
+    this.activeObstructables.clear();
+
+    const tempVec = new THREE.Vector3();
+
+    for (const obj of this.allObstructables) {
+      if (!obj.isMesh) continue;
+
+      obj.getWorldPosition(tempVec);
+      const distance = playerPosition.distanceTo(tempVec);
+
+      if (distance < radius) {
+        this.activeObstructables.add(obj);
+      }
+    }
   }
 
   initSnowfall() {
@@ -1032,8 +1223,8 @@ renderer.setSize(
   canvasContainer.clientHeight,
   false
 );
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(IS_MOBILE ? 1 : window.devicePixelRatio);
+renderer.shadowMap.enabled = !IS_MOBILE;
 
 const stats = new Stats();
 stats.showPanel(0);
@@ -1048,7 +1239,7 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(0, 2, 5);
 
 const solver = new CANNON.GSSolver();
-solver.iterations = 7;
+solver.iterations = 5;
 solver.tolerance = 0.1;
 world.solver = new CANNON.SplitSolver(solver);
 world.gravity.set(0, -100, 0);
@@ -1077,10 +1268,14 @@ orbitControls.update();
 
 const level = new Level();
 const wind = new WindSystem();
-const footprintSystem = new FootprintSystem(scene, level.planeMeshes);
+const snowPuffSystem = new SnowPuffSystem(level.planeMeshes);
+const footprintSystem = new FootprintSystem(level.planeMeshes, snowPuffSystem);
 
 const gLoader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
+raycaster.camera = camera;
+const obstructionRaycaster = new THREE.Raycaster();
+obstructionRaycaster.camera = camera;
 const downVector = new THREE.Vector3(0, -1, 0);
 
 var characterControls,
@@ -1170,6 +1365,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
 
 const clock = new THREE.Clock();
 const timeStep = 1 / 60;
+let frameCount = 0;
 function animate() {
   stats.begin();
   let deltaT = clock.getDelta();
@@ -1180,14 +1376,19 @@ function animate() {
     body.quaternion.copy(guy.quaternion);
     level.updatePlayerPlane(characterControls.model.position);
     level.updateTreeCollisions(characterControls.model.position);
+    level.handleCameraObstruction(camera, characterControls);
     updateShadowPosition();
     updatePlayerFootsteps();
+    if (frameCount % 10 === 0) {
+      level.updateActiveObstructables(characterControls.model.position);
+    }
   }
   orbitControls.update();
   wind.update();
   footprintSystem.update(deltaT);
   level.updateSnowfall();
   renderer.render(scene, camera);
+  frameCount++;
   stats.end();
   requestAnimationFrame(animate);
 }
@@ -1210,7 +1411,6 @@ function updatePlayerFootsteps() {
   const playerPos = characterControls.model.position.clone();
   const playerDir = characterControls.walkDirection.clone().normalize();
 
-  // Add footprints at movement intervals
   if (
     !characterControls.isJumping &&
     (!updatePlayerFootsteps.lastFootprint ||
