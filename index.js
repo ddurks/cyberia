@@ -71,24 +71,9 @@ export class Joystick {
     this.joyManager = nipplejs.create(options);
 
     this.joyManager["0"].on("move", (evt, data) => {
-      const forward = data.vector.y;
-      const turn = data.vector.x;
-
-      if (forward > 0) {
-        this.backward = Math.abs(forward);
-        this.forward = 0;
-      } else if (forward < 0) {
-        this.backward = 0;
-        this.forward = Math.abs(forward);
-      }
-
-      if (turn > 0) {
-        this.left = 0;
-        this.right = Math.abs(turn);
-      } else if (turn < 0) {
-        this.left = Math.abs(turn);
-        this.right = 0;
-      }
+      this.forward = -data.vector.y;
+      this.right = data.vector.x > 0 ? Math.abs(data.vector.x) : 0;
+      this.left = data.vector.x < 0 ? Math.abs(data.vector.x) : 0;
     });
 
     this.joyManager["0"].on("end", (evt) => {
@@ -197,31 +182,46 @@ export class CharacterControls {
       this.walkStart = Date.now();
     }
 
-    var angleYCameraDirection = Math.atan2(
-      this.camera.position.x - this.model.position.x,
-      this.camera.position.z - this.model.position.z
-    );
-
-    var directionOffset = IS_MOBILE
-      ? this.joyDirectionOffset(this.joystick)
-      : this.directionOffset(keysPressed);
-
-    this.rotateQuarternion.setFromAxisAngle(
-      this.rotateAngle,
-      angleYCameraDirection + directionOffset
-    );
-    this.model.quaternion.rotateTowards(this.rotateQuarternion, 0.2);
-
-    this.camera.getWorldDirection(this.walkDirection);
-    this.walkDirection.y = 0;
-    this.walkDirection.normalize();
-    this.walkDirection.applyAxisAngle(this.rotateAngle, directionOffset);
-
-    body.velocity.set(
-      this.walkDirection.x * this.walkVelocity,
-      body.velocity.y,
-      this.walkDirection.z * this.walkVelocity
-    );
+    // Blend input direction
+    let inputVec = new THREE.Vector3();
+    if (IS_MOBILE && this.joystick) {
+      inputVec.set(
+        this.joystick.right - this.joystick.left,
+        0,
+        this.joystick.forward
+      );
+    } else {
+      let x = 0,
+        z = 0;
+      if (keysPressed[W]) z -= 1;
+      if (keysPressed[S]) z += 1;
+      if (keysPressed[A]) x -= 1;
+      if (keysPressed[D]) x += 1;
+      inputVec.set(x, 0, z);
+    }
+    if (inputVec.lengthSq() > 0) {
+      inputVec.normalize();
+      // Smoothly lerp walkDirection to inputVec
+      this.walkDirection.lerp(inputVec, 0.2);
+      // Face movement direction smoothly
+      const targetAngle = Math.atan2(
+        -this.walkDirection.x,
+        -this.walkDirection.z
+      );
+      this.rotateQuarternion.setFromAxisAngle(this.rotateAngle, targetAngle);
+      this.model.quaternion.slerp(this.rotateQuarternion, 0.2);
+      // Smoothly lerp velocity
+      const targetVel = this.walkDirection
+        .clone()
+        .multiplyScalar(this.walkVelocity);
+      body.velocity.x += (targetVel.x - body.velocity.x) * 0.2;
+      body.velocity.z += (targetVel.z - body.velocity.z) * 0.2;
+    } else {
+      // Slow down smoothly when no input
+      this.walkDirection.lerp(new THREE.Vector3(0, 0, 0), 0.2);
+      body.velocity.x *= 0.8;
+      body.velocity.z *= 0.8;
+    }
   }
 
   adjustHeightFromTerrain() {
