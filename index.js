@@ -182,23 +182,39 @@ export class CharacterControls {
       this.walkStart = Date.now();
     }
 
+    // Get camera direction (flattened to XZ plane)
+    const cameraDirection = new THREE.Vector3();
+    this.camera.getWorldDirection(cameraDirection);
+    cameraDirection.y = 0;
+    cameraDirection.normalize();
+
+    // Get camera right vector (perpendicular to camera direction)
+    const cameraRight = new THREE.Vector3();
+    cameraRight.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+    cameraRight.normalize();
+
     // Blend input direction
     let inputVec = new THREE.Vector3();
     if (IS_MOBILE && this.joystick) {
-      inputVec.set(
-        this.joystick.right - this.joystick.left,
-        0,
-        this.joystick.forward
-      );
+      const forward = -this.joystick.forward;
+      const right = this.joystick.right - this.joystick.left;
+
+      // Transform joystick input to camera space
+      inputVec.copy(cameraDirection).multiplyScalar(forward);
+      inputVec.add(cameraRight.clone().multiplyScalar(right));
     } else {
-      let x = 0,
-        z = 0;
-      if (keysPressed[W]) z -= 1;
-      if (keysPressed[S]) z += 1;
-      if (keysPressed[A]) x -= 1;
-      if (keysPressed[D]) x += 1;
-      inputVec.set(x, 0, z);
+      let forward = 0,
+        right = 0;
+      if (keysPressed[W]) forward += 1;
+      if (keysPressed[S]) forward -= 1;
+      if (keysPressed[D]) right += 1;
+      if (keysPressed[A]) right -= 1;
+
+      // Transform keyboard input to camera space
+      inputVec.copy(cameraDirection).multiplyScalar(forward);
+      inputVec.add(cameraRight.clone().multiplyScalar(right));
     }
+
     if (inputVec.lengthSq() > 0) {
       inputVec.normalize();
       // Smoothly lerp walkDirection to inputVec
@@ -1421,20 +1437,40 @@ function updatePlayerFootsteps() {
   }
 }
 
+let assetsLoaded = false;
+let loadStartTime = Date.now();
+
 THREE.DefaultLoadingManager.onLoad = () => {
+  assetsLoaded = true;
+  checkAndStartGame();
+};
+
+function checkAndStartGame() {
   const loading = document.getElementById("loading");
   const loadingBG = document.getElementById("loading-bg");
-  if (loading && loadingBG) {
-    loading.src = "assets/cyberia_loading_complete.gif";
-    setTimeout(() => {
-      loading.outerHTML = "";
-      loadingBG.outerHTML = "";
-      animate();
-    }, 1250);
-  } else {
+
+  if (!loading || !loadingBG) {
     animate();
+    return;
   }
-};
+
+  const elapsed = Date.now() - loadStartTime;
+  const minimumLoadTime = 3600; // 4 seconds for initial gif
+
+  if (elapsed < minimumLoadTime) {
+    // Wait until 4 seconds have passed
+    setTimeout(checkAndStartGame, minimumLoadTime - elapsed);
+    return;
+  }
+
+  // Now show the completion gif for 2 seconds
+  loading.src = "assets/cyberia_loading_complete.gif";
+  setTimeout(() => {
+    loading.outerHTML = "";
+    loadingBG.outerHTML = "";
+    animate();
+  }, 1600);
+}
 
 function onWindowResize() {
   const width = canvasContainer.clientWidth;
