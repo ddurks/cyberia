@@ -133,11 +133,15 @@ body.mobile #hud-container {
 #loading {
   position: fixed;
   bottom: 0;
-  left: 0;
-  width: 100vw;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 100vw;
+  max-height: 100vh;
+  width: auto;
   height: auto;
   z-index: 9999;
   pointer-events: none;
+  object-fit: contain;
 }
 
 #loading-bg {

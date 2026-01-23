@@ -1,15 +1,19 @@
 import * as THREE from "three";
-import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.139.0/examples/jsm/loaders/GLTFLoader.js";
-import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.117.1/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import * as CANNON from "cannon";
+import { NetworkClient } from "./network.js";
+import { MultiplayerManager } from "./multiplayer.js";
+import { WorldGenerator } from "./worldgen.js";
+import { getNetworkConfig } from "./config.js";
 
 var IS_MOBILE;
 if (
   /(android|bb\d+|meego).+mobile|avantgo|bada\/|blackberry|blazer|compal|elaine|fennec|hiptop|iemobile|ip(hone|od)|ipad|iris|kindle|Android|Silk|lge |maemo|midp|mmp|netfront|opera m(ob|in)i|palm( os)?|phone|p(ixi|re)\/|plucker|pocket|psp|series(4|6)0|symbian|treo|up\.(browser|link)|vodafone|wap|windows (ce|phone)|xda|xiino/i.test(
-    navigator.userAgent
+    navigator.userAgent,
   ) ||
   /1207|6310|6590|3gso|4thp|50[1-6]i|770s|802s|a wa|abac|ac(er|oo|s\-)|ai(ko|rn)|al(av|ca|co)|amoi|an(ex|ny|yw)|aptu|ar(ch|go)|as(te|us)|attw|au(di|\-m|r |s )|avan|be(ck|ll|nq)|bi(lb|rd)|bl(ac|az)|br(e|v)w|bumb|bw\-(n|u)|c55\/|capi|ccwa|cdm\-|cell|chtm|cldc|cmd\-|co(mp|nd)|craw|da(it|ll|ng)|dbte|dc\-s|devi|dica|dmob|do(c|p)o|ds(14|\-d)|el(49|ai)|em(l2|ul)|er(ic|k0)|esl8|ez([4-7]0|os|wa|ze)|fetc|fly(\-|_)|g1 u|g560|gene|gf\-5|g\-mo|go(\.w|od)|gr(ad|un)|haie|hcit|hd\-(m|p|t)|hei\-|hi(pt|ta)|hp( i|ip)|hs\-c|ht(c(\-| |_|a|g|p|s|t)|tp)|hu(aw|tc)|i\-(20|go|ma)|i230|iac( |\-|\/)|ibro|idea|ig01|ikom|im1k|inno|ipaq|iris|ja(t|v)a|jbro|jemu|jigs|kddi|keji|kgt( |\/)|klon|kpt |kwc\-|kyo(c|k)|le(no|xi)|lg( g|\/(k|l|u)|50|54|\-[a-w])|libw|lynx|m1\-w|m3ga|m50\/|ma(te|ui|xo)|mc(01|21|ca)|m\-cr|me(rc|ri)|mi(o8|oa|ts)|mmef|mo(01|02|bi|de|do|t(\-| |o|v)|zz)|mt(50|p1|v )|mwbp|mywa|n10[0-2]|n20[2-3]|n30(0|2)|n50(0|2|5)|n7(0(0|1)|10)|ne((c|m)\-|on|tf|wf|wg|wt)|nok(6|i)|nzph|o2im|op(ti|wv)|oran|owg1|p800|pan(a|d|t)|pdxg|pg(13|\-([1-8]|c))|phil|pire|pl(ay|uc)|pn\-2|po(ck|rt|se)|prox|psio|pt\-g|qa\-a|qc(07|14|21|32|60|\-[2-7]|i\-)|qtek|r380|r600|raks|rim9|ro(ve|zo)|s55\/|sa(ge|ma|mm|ms|ny|va)|sc(01|h\-|oo|p\-)|sdk\/|se(c(\-|0|1)|47|mc|nd|ri)|sgh\-|shar|sie(\-|m)|sk\-0|sl(45|id)|sm(al|ar|b3|it|t5)|so(ft|ny)|sp(01|h\-|v\-|v )|sy(01|mb)|t2(18|50)|t6(00|10|18)|ta(gt|lk)|tcl\-|tdg\-|tel(i|m)|tim\-|t\-mo|to(pl|sh)|ts(70|m\-|m3|m5)|tx\-9|up(\.b|g1|si)|utst|v400|v750|veri|vi(rg|te)|vk(40|5[0-3]|\-v)|vm40|voda|vulc|vx(52|53|60|61|70|84|81|83|85|98)|w3c(\-| )|webc|whit|wi(g |nc|nw)|wmlb|wonu|x700|yas\-|your|zeto|zte\-/i.test(
-    navigator.userAgent.substr(0, 4)
+    navigator.userAgent.substr(0, 4),
   )
 ) {
   IS_MOBILE = true;
@@ -38,15 +42,21 @@ document.addEventListener(
   (event) => {
     keysPressed[event.key.toLowerCase()] = true;
   },
-  false
+  false,
 );
 document.addEventListener(
   "keyup",
   (event) => {
     keysPressed[event.key.toLowerCase()] = false;
   },
-  false
+  false,
 );
+
+// Multiplayer globals
+let networkClient = null;
+let multiplayerManager = null;
+let worldGenerator = null;
+const MULTIPLAYER_ENABLED = true; // Set to false to disable
 
 export class Joystick {
   backward = 0;
@@ -108,7 +118,7 @@ export class CharacterControls {
     orbitControl,
     camera,
     currentAction,
-    level
+    level,
   ) {
     this.model = model;
     this.mixer = mixer;
@@ -128,7 +138,7 @@ export class CharacterControls {
 
   update(delta, keysPressed) {
     const directionPressed = DIRECTIONS.some(
-      (key) => keysPressed[key] === true
+      (key) => keysPressed[key] === true,
     );
     const joystickPressed = this.joystick
       ? JOY_DIRS.some((key) => this.joystick[key] > 0)
@@ -168,7 +178,7 @@ export class CharacterControls {
             this.isStartingJump = false;
             this.isJumping = true;
           }
-        : undefined
+        : undefined,
     );
     if (this.level.planeMeshes) {
       this.adjustHeightFromTerrain();
@@ -222,7 +232,7 @@ export class CharacterControls {
       // Face movement direction smoothly
       const targetAngle = Math.atan2(
         -this.walkDirection.x,
-        -this.walkDirection.z
+        -this.walkDirection.z,
       );
       this.rotateQuarternion.setFromAxisAngle(this.rotateAngle, targetAngle);
       this.model.quaternion.slerp(this.rotateQuarternion, 0.2);
@@ -241,34 +251,24 @@ export class CharacterControls {
   }
 
   adjustHeightFromTerrain() {
-    if (this.isJumping) {
-      if (body.velocity.y < 0) {
-        raycaster.set(
-          this.model.position.clone().add(new THREE.Vector3(0, 1, 0)),
-          downVector
-        );
-        const intersects = raycaster.intersectObjects(
-          this.level.planeMeshes,
-          true
-        );
-        if (intersects.length > 0 && intersects[0].distance < 1.5) {
-          this.isJumping = false;
-        }
-      }
-    } else {
+    // Only check for landing when jumping
+    if (this.isJumping && body.velocity.y < 0) {
       raycaster.set(
-        this.model.position.clone().add(new THREE.Vector3(0, 100, 0)),
-        downVector
+        this.model.position.clone().add(new THREE.Vector3(0, 1, 0)),
+        downVector,
       );
       const intersects = raycaster.intersectObjects(
         this.level.planeMeshes,
-        true
+        true,
       );
-      if (intersects.length > 0) {
-        const targetY = intersects[0].point.y;
-        this.model.position.y += targetY - this.model.position.y;
-        body.position.y = this.model.position.y;
+      if (intersects.length > 0 && intersects[0].distance < 1.5) {
+        this.isJumping = false;
       }
+    }
+
+    // Let physics body handle Y position (no raycast override)
+    // Stick feet to terrain for visual effect only
+    if (!this.isJumping && this.level.planeMeshes) {
       this.stickFeetToTerrain();
     }
   }
@@ -513,7 +513,7 @@ class SnowPuffSystem {
       0,
       size / 2,
       size / 2,
-      size / 2
+      size / 2,
     );
     gradient.addColorStop(0, "rgba(255, 255, 255, 0.8)");
     gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
@@ -581,7 +581,7 @@ class FootprintSystem {
           depthWrite: false,
           blending: THREE.NormalBlending,
           side: THREE.DoubleSide,
-        })
+        }),
       );
       mesh.visible = false;
       scene.add(mesh);
@@ -603,7 +603,7 @@ class FootprintSystem {
       size * 0.1,
       size / 2,
       size / 2,
-      size * 0.5
+      size * 0.5,
     );
     gradient.addColorStop(0, "rgba(10, 20, 60, 0.3)"); // Darker blue center
     gradient.addColorStop(1, "rgba(10, 20, 60, 0)"); // Fade to transparent
@@ -623,12 +623,12 @@ class FootprintSystem {
     const perp = new THREE.Vector3(
       -playerDirection.z,
       0,
-      playerDirection.x
+      playerDirection.x,
     ).normalize();
     const offset = perp
       .clone()
       .multiplyScalar(
-        this.lastFoot === "right" ? lateralOffset : -lateralOffset
+        this.lastFoot === "right" ? lateralOffset : -lateralOffset,
       );
     const back = playerDirection.clone().multiplyScalar(-stepBack);
 
@@ -636,7 +636,7 @@ class FootprintSystem {
 
     raycaster.set(
       footprintPos.clone().add(new THREE.Vector3(0, 1, 0)),
-      downVector
+      downVector,
     );
     const intersects = raycaster.intersectObjects(this.groundObjects, true);
     if (intersects.length === 0) return;
@@ -682,7 +682,7 @@ class FootprintSystem {
     // tilt the footprint by 90 degrees around the "right" axis to lay it flat
     const tiltQuat = new THREE.Quaternion().setFromAxisAngle(
       rightDir,
-      Math.PI / 2
+      Math.PI / 2,
     );
 
     mesh.quaternion.copy(alignQuat);
@@ -736,7 +736,7 @@ export class WindSystem {
     this.windVector = new THREE.Vector3(
       Math.cos(this.angle) * this.speed,
       0,
-      Math.sin(this.angle) * this.speed
+      Math.sin(this.angle) * this.speed,
     );
   }
 
@@ -751,6 +751,7 @@ export class Level {
   currentPlayerRoomZ = 0;
   planeSize = 100;
   planeMeshes = [];
+  terrainBodies = new Map(); // Cannon.js ground bodies by tile key
   treeTypes = {};
   treeMeshes = {};
   treeInstanceCounters = {};
@@ -760,6 +761,8 @@ export class Level {
   transparentObstructions = new Set();
   allObstructables = new Set();
   activeObstructables = new Set();
+  treeInstancesFromBootstrap = []; // Tree positions from bootstrap
+  terrainBodies = new Map(); // Cannon.js ground bodies by tile key
 
   constructor() {
     this.light();
@@ -773,6 +776,33 @@ export class Level {
       }
     }
     this.initSnowfall();
+  }
+
+  // Apply bootstrap data from server (tree positions only)
+  setBootstrap(bootstrapData) {
+    console.log("🗺️  Applying bootstrap data to Level");
+
+    // Extract tree instances for deterministic placement
+    const treeGroup = bootstrapData.instances?.find((g) => g.kind === "tree");
+    if (treeGroup) {
+      this.treeInstancesFromBootstrap = treeGroup.positions;
+      console.log(
+        "📍 Loaded",
+        this.treeInstancesFromBootstrap.length,
+        "tree positions from bootstrap",
+      );
+
+      // Clear existing trees and respawn with bootstrap positions
+      this.spawnedTreeGroups.forEach((group) => scene.remove(group.mesh));
+      this.spawnedTreeGroups = [];
+      this.treeCollisionData = [];
+      this.activeTreeBodies = [];
+
+      // Respawn trees on existing planes
+      this.planeMeshes.forEach((plane) => {
+        this.placeTreesOnPlane(plane);
+      });
+    }
   }
 
   light() {
@@ -803,25 +833,38 @@ export class Level {
   }
 
   calculateHeight(x, z, localX, localZ, width) {
+    // Use bootstrap seed for procedural generation
+    if (this.bootstrap && this.bootstrap.seed !== undefined) {
+      const config = this.bootstrap.heightmapConfig || {
+        scale: 0.005,
+        amplitude: 3,
+      };
+      const seed = this.bootstrap.seed;
+
+      // Helper function for noise (same as worldgen)
+      const noise = (nx, nz) => {
+        const sx = nx + seed;
+        const sz = nz + seed;
+        const n = Math.sin(sx * 12.9898 + sz * 78.233) * 43758.5453;
+        return (n - Math.floor(n)) * 2 - 1;
+      };
+
+      // Multi-octave noise for smooth terrain
+      const nx = x * config.scale;
+      const nz = z * config.scale;
+      const noise1 = noise(nx, nz) * 1.0;
+      const noise2 = noise(nx * 2, nz * 2) * 0.5;
+      const noise3 = noise(nx * 4, nz * 4) * 0.25;
+
+      return (noise1 + noise2 + noise3) * config.amplitude;
+    }
+
+    // Fallback: use simple sine wave (matches server physics)
     const frequency = 0.1;
-    const amplitude = 0.75;
-    const edgeBlendWidth = 3;
+    const amplitude = 1.5;
 
-    const edgeDistanceX = Math.min(localX, width - localX);
-    const edgeDistanceZ = Math.min(localZ, width - localZ);
-    const edgeDistance = Math.min(edgeDistanceX, edgeDistanceZ);
-
-    const blendFactor = Math.max(
-      0,
-      (edgeDistance - edgeBlendWidth) / edgeBlendWidth
-    );
-
-    return (
-      amplitude *
-      Math.sin(frequency * x) *
-      Math.cos(frequency * z) *
-      blendFactor
-    );
+    // Simple sine wave - same formula as server
+    return amplitude * Math.sin(frequency * x) * Math.sin(frequency * z);
   }
 
   createPlane(x, y, z) {
@@ -829,7 +872,7 @@ export class Level {
       this.planeSize,
       this.planeSize,
       IS_MOBILE ? 20 : 50,
-      IS_MOBILE ? 20 : 50
+      IS_MOBILE ? 20 : 50,
     );
     geometry.rotateX(-Math.PI * 0.5);
 
@@ -838,12 +881,21 @@ export class Level {
     let width = Math.sqrt(positions.length / 3) - 1;
 
     for (let i = 0, j = 0; i < positions.length; i += 3, j++) {
-      const x = positions[i];
-      const z = positions[i + 2];
+      const localX_vertex = positions[i];
+      const localZ_vertex = positions[i + 2];
+      // Convert to world coordinates for seamless tiling
+      const worldX = localX_vertex + x;
+      const worldZ = localZ_vertex + z;
       const localX = j % (width + 1);
       const localZ = Math.floor(j / (width + 1));
-      const y = this.calculateHeight(x, z, localX, localZ, width);
-      positions[i + 1] += y;
+      const y_height = this.calculateHeight(
+        worldX,
+        worldZ,
+        localX,
+        localZ,
+        width,
+      );
+      positions[i + 1] += y_height;
     }
 
     // Update positions and recompute normals
@@ -873,6 +925,10 @@ export class Level {
     plane.receiveShadow = true;
     plane.visible = true;
     scene.add(plane);
+
+    // Don't create static Cannon bodies - we'll use custom ground collision
+    // that matches server's sine wave terrain in the physics loop
+
     return plane;
   }
 
@@ -932,18 +988,127 @@ export class Level {
     const keys = Object.keys(this.treeTypes);
     if (!keys.length) return placedTrees;
 
+    // If we have bootstrap instances, use those instead of random generation
+    if (
+      this.treeInstancesFromBootstrap &&
+      this.treeInstancesFromBootstrap.length > 0
+    ) {
+      console.log("🌲 Placing trees from bootstrap data");
+
+      for (const treeInstance of this.treeInstancesFromBootstrap) {
+        // Check if this tree is on this plane
+        const planeWorldPos = new THREE.Vector3();
+        plane.getWorldPosition(planeWorldPos);
+
+        const distX = Math.abs(treeInstance.x - planeWorldPos.x);
+        const distZ = Math.abs(treeInstance.z - planeWorldPos.z);
+
+        // Only place trees that belong to this plane
+        if (distX > this.planeSize / 2 || distZ > this.planeSize / 2) continue;
+
+        // Get ground height at this position
+        const worldPosition = new THREE.Vector3(
+          treeInstance.x,
+          100,
+          treeInstance.z,
+        );
+        raycaster.set(worldPosition, downVector);
+        const intersects = raycaster.intersectObject(plane, true);
+        if (intersects.length === 0) continue;
+
+        const { point, face } = intersects[0];
+        const normal = face.normal.clone().normalize();
+
+        // Use random tree type (or we could encode type in bootstrap)
+        const treeName = keys[Math.floor(Math.random() * keys.length)];
+        const parts = this.treeTypes[treeName];
+
+        const treeGroup = new THREE.Group();
+
+        parts.forEach((part) => {
+          const mesh = new THREE.Mesh(part.geometry, part.material.clone());
+          mesh.castShadow = IS_MOBILE ? false : true;
+          mesh.receiveShadow = IS_MOBILE ? false : true;
+          mesh.userData.isObstructable = true;
+          mesh.material.transparent = true;
+          treeGroup.add(mesh);
+          this.allObstructables.add(mesh);
+        });
+
+        // Align to ground normal
+        const up = new THREE.Vector3(0, 1, 0);
+        const alignQuat = new THREE.Quaternion().setFromUnitVectors(up, normal);
+        const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+          normal,
+          treeInstance.yaw || 0,
+        );
+
+        treeGroup.quaternion.copy(alignQuat);
+        treeGroup.quaternion.premultiply(spinQuat);
+
+        const scale = treeInstance.scale || 1.0;
+        treeGroup.scale.setScalar(scale);
+        const snowDepth = 0.15;
+        treeGroup.position.copy(point).add(new THREE.Vector3(0, -snowDepth, 0));
+        scene.add(treeGroup);
+
+        this.spawnedTreeGroups.push({
+          mesh: treeGroup,
+          position: treeGroup.position.clone(),
+        });
+        placedTrees.push(treeGroup);
+
+        const bbox = new THREE.Box3().setFromObject(treeGroup);
+        const height = bbox.max.y - bbox.min.y;
+        const radius =
+          (bbox.max.x - bbox.min.x + bbox.max.z - bbox.min.z) * 0.02;
+        this.treeCollisionData.push({
+          position: treeGroup.position.clone(),
+          quaternion: treeGroup.quaternion.clone(),
+          radius,
+          height,
+        });
+      }
+
+      return placedTrees;
+    }
+
+    // Fallback: random tree generation (original code)
     const numTrees = 100 + Math.floor(Math.random() * 100);
 
+    // Generate cluster centers for natural grouping
+    const numClusters = IS_MOBILE ? 8 : 15;
+    const clusters = [];
+    for (let c = 0; c < numClusters; c++) {
+      clusters.push({
+        x: (Math.random() - 0.5) * this.planeSize * 0.8,
+        z: (Math.random() - 0.5) * this.planeSize * 0.8,
+        radius: 8 + Math.random() * 12, // Cluster spread radius
+        density: 0.5 + Math.random() * 0.5, // Some clusters denser than others
+      });
+    }
+
     for (let i = 0; i < numTrees; i++) {
-      const localX = (Math.random() - 0.5) * this.planeSize;
-      const localZ = (Math.random() - 0.5) * this.planeSize;
+      let localX, localZ;
+
+      // 70% chance to spawn near a cluster, 30% scattered
+      if (Math.random() < 0.7) {
+        const cluster = clusters[Math.floor(Math.random() * clusters.length)];
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * cluster.radius * cluster.density;
+        localX = cluster.x + Math.cos(angle) * distance;
+        localZ = cluster.z + Math.sin(angle) * distance;
+      } else {
+        localX = (Math.random() - 0.5) * this.planeSize;
+        localZ = (Math.random() - 0.5) * this.planeSize;
+      }
 
       const localPosition = new THREE.Vector3(localX, 0, localZ);
       const worldPosition = localPosition.applyMatrix4(plane.matrixWorld);
 
       raycaster.set(
         worldPosition.clone().add(new THREE.Vector3(0, 100, 0)),
-        downVector
+        downVector,
       );
       const intersects = raycaster.intersectObject(plane, true);
       if (intersects.length === 0) continue;
@@ -973,7 +1138,7 @@ export class Level {
       const rotationY = Math.random() * Math.PI * 2;
       const spinQuat = new THREE.Quaternion().setFromAxisAngle(
         normal,
-        rotationY
+        rotationY,
       );
 
       treeGroup.quaternion.copy(alignQuat);
@@ -993,7 +1158,7 @@ export class Level {
 
       const bbox = new THREE.Box3().setFromObject(treeGroup);
       const height = bbox.max.y - bbox.min.y;
-      const radius = (bbox.max.x - bbox.min.x + bbox.max.z - bbox.min.z) * 0.02;
+      const radius = (bbox.max.x - bbox.min.x + bbox.max.z - bbox.min.z) * 0.15; // Increased from 0.02 for better collision
       this.treeCollisionData.push({
         position: treeGroup.position.clone(),
         quaternion: treeGroup.quaternion.clone(),
@@ -1015,7 +1180,7 @@ export class Level {
           data.radius,
           data.radius,
           data.height,
-          8
+          8,
         );
         const body = new CANNON.Body({
           mass: 0,
@@ -1023,7 +1188,7 @@ export class Level {
           position: new CANNON.Vec3(
             data.position.x,
             data.position.y + data.height / 2,
-            data.position.z
+            data.position.z,
           ),
         });
         body.allowSleep = true;
@@ -1033,7 +1198,7 @@ export class Level {
           data.quaternion.x,
           data.quaternion.y,
           data.quaternion.z,
-          data.quaternion.w
+          data.quaternion.w,
         );
 
         data.body = body;
@@ -1067,7 +1232,7 @@ export class Level {
 
     const intersects = obstructionRaycaster.intersectObjects(
       Array.from(this.activeObstructables),
-      true
+      true,
     );
 
     for (let i = 0; i < intersects.length; i++) {
@@ -1111,9 +1276,9 @@ export class Level {
 
   initSnowfall() {
     this.snowConfig = {
-      particleCount: IS_MOBILE ? 500 : 1000,
-      boxSize: IS_MOBILE ? 50 : 100,
-      height: 50,
+      particleCount: IS_MOBILE ? 500 : 1000, // Reduced for performance
+      boxSize: IS_MOBILE ? 50 : 80,
+      height: 40,
       fallSpeed: 0.1,
       driftSpeed: 0.1,
     };
@@ -1134,14 +1299,14 @@ export class Level {
 
     this.snowGeometry.setAttribute(
       "position",
-      new THREE.BufferAttribute(this.snowPositions, 3)
+      new THREE.BufferAttribute(this.snowPositions, 3),
     );
 
     this.snowMaterial = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.8,
+      size: 0.6, // Slightly smaller for denser look
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.85, // Slightly more transparent to prevent visual overload
       depthWrite: false,
       map: this.generateSnowflakeTexture(),
     });
@@ -1158,17 +1323,34 @@ export class Level {
 
     const positions = this.snowGeometry.attributes.position.array;
     const playerPos = camera.position;
-
     const windForce = wind.getWindForce();
+
+    // Boundaries for the snow cube following the player
+    const halfBoxSize = this.snowConfig.boxSize / 2;
+    const minX = playerPos.x - halfBoxSize;
+    const maxX = playerPos.x + halfBoxSize;
+    const minZ = playerPos.z - halfBoxSize;
+    const maxZ = playerPos.z + halfBoxSize;
+    const minY = playerPos.y - 10;
+    const maxY = playerPos.y + this.snowConfig.height;
 
     for (let i = 0; i < this.snowConfig.particleCount; i++) {
       const index = i * 3;
 
+      // Update positions with wind and gravity
       positions[index] += windForce.x;
       positions[index + 1] -= this.snowConfig.fallSpeed;
       positions[index + 2] += windForce.z;
 
-      if (positions[index + 1] < playerPos.y - 10) {
+      // Reset if particle falls below player or moves outside the cube
+      const outOfBounds =
+        positions[index + 1] < minY ||
+        positions[index] < minX ||
+        positions[index] > maxX ||
+        positions[index + 2] < minZ ||
+        positions[index + 2] > maxZ;
+
+      if (outOfBounds) {
         this.resetSnowflake(i, false);
       }
     }
@@ -1205,7 +1387,7 @@ export class Level {
       1,
       size / 2,
       size / 2,
-      size / 2
+      size / 2,
     );
     gradient.addColorStop(0, "rgba(255, 255, 255, 1)"); // bright white center
     gradient.addColorStop(0.7, "rgba(245, 245, 255, 0.75)"); // softer bluish-white
@@ -1223,6 +1405,122 @@ export class Level {
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdedede);
 
+// Initialize multiplayer
+if (MULTIPLAYER_ENABLED) {
+  console.log("🎮 Initializing multiplayer...");
+  // guy and footprintSystem are not defined yet, will be set later
+  multiplayerManager = new MultiplayerManager(scene, null, null);
+  networkClient = new NetworkClient();
+  worldGenerator = new WorldGenerator(Date.now());
+
+  networkClient.onConnected = (playerId) => {
+    console.log("✅ Connected as player:", playerId);
+    multiplayerManager.setLocalPlayerId(playerId);
+  };
+
+  networkClient.onSnapshot = (snapshot) => {
+    if (multiplayerManager) multiplayerManager.handleSnapshot(snapshot);
+  };
+
+  // Server reconciliation for local player
+  if (multiplayerManager) {
+    multiplayerManager.onServerState = (serverState) => {
+      if (!characterControls || !body) return;
+
+      const serverPos = {
+        x: serverState.x,
+        y: serverState.y,
+        z: serverState.z,
+      };
+      const clientPos = body.position;
+
+      // Calculate position error
+      const dx = serverPos.x - clientPos.x;
+      const dy = serverPos.y - clientPos.y;
+      const dz = serverPos.z - clientPos.z;
+      const errorSq = dx * dx + dy * dy + dz * dz;
+
+      // Very tight thresholds for perfect sync across clients
+      const snapThreshold = 1.0; // 1 unit distance
+      const lerpThreshold = 0.001; // 0.03 units distance - extremely tight
+
+      // Debug occasionally
+      if (Math.random() < 0.05) {
+        console.log(
+          "📊 Reconciliation - Error:",
+          Math.sqrt(errorSq).toFixed(3),
+          "Client:",
+          clientPos.x.toFixed(2),
+          clientPos.y.toFixed(2),
+          clientPos.z.toFixed(2),
+          "Server:",
+          serverPos.x.toFixed(2),
+          serverPos.y.toFixed(2),
+          serverPos.z.toFixed(2),
+        );
+      }
+
+      if (errorSq > snapThreshold) {
+        // Large error - immediate snap
+        console.log(
+          "🔄 Snapping position, error:",
+          Math.sqrt(errorSq).toFixed(2),
+        );
+        body.position.set(serverPos.x, serverPos.y, serverPos.z);
+        guy.position.copy(body.position);
+      } else if (errorSq > lerpThreshold) {
+        // Any drift - strong lerp towards server for XZ
+        const lerpFactor = 0.3;
+        body.position.x += dx * lerpFactor;
+        body.position.z += dz * lerpFactor;
+        // Y-axis: instant snap to server (server has authoritative heightmap)
+        body.position.y = serverPos.y;
+        guy.position.copy(body.position);
+      } else {
+        // Small XZ error, still snap Y instantly
+        body.position.y = serverPos.y;
+        guy.position.y = body.position.y;
+      }
+
+      // Also sync rotation
+      if (serverState.yaw !== undefined) {
+        const yawError = Math.abs(serverState.yaw - guy.rotation.y);
+        if (yawError > 0.1) {
+          // 5.7 degrees
+          // Lerp rotation towards server
+          guy.rotation.y += (serverState.yaw - guy.rotation.y) * 0.2;
+        }
+      }
+    };
+  }
+
+  networkClient.onBootstrapRequired = () => {
+    console.log("📤 Uploading world bootstrap...");
+    const bootstrap = worldGenerator.generateBootstrap(128, 128, 1.0);
+    networkClient.uploadBootstrap(bootstrap);
+  };
+
+  networkClient.onBootstrapData = (payload) => {
+    console.log("📥 Received world bootstrap");
+    if (level) {
+      level.setBootstrap(payload);
+    }
+  };
+
+  // Connect to backend
+  const config = getNetworkConfig();
+  if (config.mode === "matchmaker") {
+    networkClient
+      .connectToMatchmaker(config.matchmakerUrl)
+      .then(() => networkClient.createAndJoinWorld("cyberia"))
+      .catch((err) => console.error("❌ Network error:", err));
+  } else if (config.mode === "direct") {
+    networkClient
+      .connectToWorld(config.worldServerUrl)
+      .catch((err) => console.error("❌ Network error:", err));
+  }
+}
+
 const world = new CANNON.World();
 world.defaultContactMaterial.contactEquationStiffness = 1e9;
 world.defaultContactMaterial.contactEquationRelaxation = 4;
@@ -1237,20 +1535,21 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setSize(
   canvasContainer.clientWidth,
   canvasContainer.clientHeight,
-  false
+  false,
 );
 renderer.setPixelRatio(IS_MOBILE ? 1 : window.devicePixelRatio);
 renderer.shadowMap.enabled = !IS_MOBILE;
 
 const stats = new Stats();
 stats.showPanel(0);
+stats.dom.style.display = "none"; // Hidden for footage
 document.body.appendChild(stats.dom);
 
 const camera = new THREE.PerspectiveCamera(
   50,
   canvas.clientWidth / canvas.clientHeight,
   0.1,
-  100
+  100,
 );
 camera.position.set(0, 2, 5);
 
@@ -1266,7 +1565,7 @@ const physicsContactMaterial = new CANNON.ContactMaterial(
   {
     friction: 0.3,
     restitution: 0.0,
-  }
+  },
 );
 world.addContactMaterial(physicsContactMaterial);
 
@@ -1286,6 +1585,12 @@ const level = new Level();
 const wind = new WindSystem();
 const snowPuffSystem = new SnowPuffSystem(level.planeMeshes);
 const footprintSystem = new FootprintSystem(level.planeMeshes, snowPuffSystem);
+
+// Set footprint system reference for multiplayer
+if (multiplayerManager) {
+  multiplayerManager.footprintSystem = footprintSystem;
+  console.log("✅ Set footprint system reference for multiplayer");
+}
 
 const gLoader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
@@ -1337,13 +1642,15 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   const slipperyMaterial = new CANNON.Material("slippery");
   slipperyMaterial.friction = 0;
 
-  const shape = new CANNON.Box(new CANNON.Vec3(1, 1, 1));
+  // Use sphere to match server capsule radius (0.35)
+  const shape = new CANNON.Sphere(0.35);
   body = new CANNON.Body({
     mass: 1,
     material: slipperyMaterial,
   });
   body.addShape(shape);
-  body.position.copy(guy.position);
+  body.position.set(0, 1, 0);
+  guy.position.copy(body.position);
   body.lastPosition = {
     x: body.position.x,
     y: body.position.y,
@@ -1356,7 +1663,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
     clip.tracks = clip.tracks.filter((track) => {
       // Only keep tracks that are not rotating foot/toe bones
       return !footBoneNames.some((name) =>
-        track.name.endsWith(`${name}.quaternion`)
+        track.name.endsWith(`${name}.quaternion`),
       );
     });
   });
@@ -1375,8 +1682,14 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
     orbitControls,
     camera,
     "idle",
-    level
+    level,
   );
+
+  // Set reference for multiplayer after guy is loaded
+  if (multiplayerManager) {
+    multiplayerManager.localCharacter = guy;
+    console.log("✅ Set local character reference for multiplayer");
+  }
 });
 
 const clock = new THREE.Clock();
@@ -1386,19 +1699,98 @@ function animate() {
   stats.begin();
   let deltaT = clock.getDelta();
   world.step(timeStep, deltaT);
+
+  // Apply custom terrain collision (matches server physics)
+  // Only constrains Y, preserves XZ collision responses from tree bodies
+  if (body) {
+    const frequency = 0.1;
+    const amplitude = 1.5;
+    const terrainY =
+      amplitude *
+      Math.sin(frequency * body.position.x) *
+      Math.sin(frequency * body.position.z);
+    const groundY = terrainY; // Add capsule radius
+
+    if (body.position.y <= groundY) {
+      body.position.y = groundY;
+      body.velocity.y = Math.max(0, body.velocity.y);
+    }
+  }
+
   if (characterControls) {
     characterControls.update(deltaT, keysPressed);
+
+    // Client-side prediction - run physics locally
     guy.position.copy(body.position);
     body.quaternion.copy(guy.quaternion);
+
     level.updatePlayerPlane(characterControls.model.position);
     level.updateTreeCollisions(characterControls.model.position);
     level.handleCameraObstruction(camera, characterControls);
     updateShadowPosition();
     updatePlayerFootsteps();
+
+    // Send input to server (every other frame = 30fps to avoid rate limits)
+    if (networkClient && networkClient.connected && frameCount % 2 === 0) {
+      // Get camera direction (same as CharacterControls uses)
+      const cameraDirection = new THREE.Vector3();
+      camera.getWorldDirection(cameraDirection);
+      cameraDirection.y = 0;
+      cameraDirection.normalize();
+
+      const cameraRight = new THREE.Vector3();
+      cameraRight.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+      cameraRight.normalize();
+
+      // Get input from WASD or joystick
+      let inputForward = 0,
+        inputRight = 0;
+
+      if (IS_MOBILE && characterControls.joystick) {
+        inputRight =
+          characterControls.joystick.right - characterControls.joystick.left;
+        inputForward = -characterControls.joystick.forward;
+      } else {
+        if (keysPressed[W]) inputForward += 1;
+        if (keysPressed[S]) inputForward -= 1;
+        if (keysPressed[D]) inputRight += 1;
+        if (keysPressed[A]) inputRight -= 1;
+      }
+
+      // Transform to world space (same as CharacterControls)
+      const worldDir = new THREE.Vector3();
+      worldDir.copy(cameraDirection).multiplyScalar(inputForward);
+      worldDir.add(cameraRight.clone().multiplyScalar(inputRight));
+
+      // Normalize
+      const len = worldDir.length();
+      if (len > 1) worldDir.divideScalar(len);
+
+      // Transform world direction to character-local space for server
+      // Character forward is -Z at rotation 0
+      const yaw = characterControls.model.rotation.y;
+      const cosYaw = Math.cos(-yaw); // Negate because rotation is opposite
+      const sinYaw = Math.sin(-yaw);
+
+      const localMx = worldDir.x * cosYaw - worldDir.z * sinYaw;
+      const localMz = worldDir.x * sinYaw + worldDir.z * cosYaw;
+
+      const jumpPressed =
+        keysPressed[SPACE] || characterControls.aPressed || false;
+
+      networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
+    }
+
     if (frameCount % 10 === 0) {
       level.updateActiveObstructables(characterControls.model.position);
     }
   }
+
+  // Update network players
+  if (multiplayerManager) {
+    multiplayerManager.update(deltaT);
+  }
+
   orbitControls.update();
   wind.update();
   footprintSystem.update(deltaT);
@@ -1415,7 +1807,7 @@ function updateShadowPosition() {
   level.sunLight.position.set(
     playerPos.x - 60,
     playerPos.y + 100,
-    playerPos.z - 10
+    playerPos.z - 10,
   );
   level.sunLight.target.position.set(playerPos.x, playerPos.y, playerPos.z);
   level.sunLight.target.updateMatrixWorld();
@@ -1466,8 +1858,12 @@ function checkAndStartGame() {
   // Now show the completion gif for 2 seconds
   loading.src = "assets/cyberia_loading_complete.gif";
   setTimeout(() => {
-    loading.outerHTML = "";
-    loadingBG.outerHTML = "";
+    if (loading.parentNode) {
+      loading.outerHTML = "";
+    }
+    if (loadingBG.parentNode) {
+      loadingBG.outerHTML = "";
+    }
     animate();
   }, 1600);
 }
