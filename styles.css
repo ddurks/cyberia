@@ -7,6 +7,44 @@ html, body {
   background-color: #ddeeff;
 }
 
+#online-status {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 8px 16px;
+  border-radius: 4px;
+  pointer-events: none;
+  transition: all 0.3s ease;
+}
+
+#online-status.online {
+  color: #405640;
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.8),
+               0 0 20px rgba(0, 255, 0, 0.6),
+               0 0 30px rgba(0, 255, 0, 0.4);
+}
+
+#online-status.online .count {
+  color: #405640;
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.8),
+               0 0 20px rgba(0, 255, 0, 0.6),
+               0 0 30px rgba(0, 255, 0, 0.4);
+}
+
+#online-status.offline {
+  color: rgba(128, 128, 128, 0.8);
+  animation: flash 2s ease-in-out infinite;
+}
+
+@keyframes flash {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 /* Default full-screen layout for desktop */
 body.desktop #canvas-container {
   position: relative;

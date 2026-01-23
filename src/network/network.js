@@ -142,31 +142,31 @@ export class NetworkClient {
 
     // If not joined yet, queue the upload
     if (!this.joined) {
-      console.log("⏳ Queueing bootstrap upload until joined...");
+      // Queueing bootstrap upload until joined
       const checkJoined = setInterval(() => {
         if (this.joined) {
           clearInterval(checkJoined);
-          console.log("✅ Now joined, sending queued bootstrap...");
+          // Now joined, sending queued bootstrap
           this._sendToWorld({
             t: "bootstrapUpload",
             worldId: "local",
             version: 1,
             payload,
           });
-          console.log(`✅ Bootstrap sent to server`);
+          // Bootstrap sent
         }
       }, 50); // Check every 50ms
       return;
     }
 
-    console.log(`📤 Sending bootstrap to server...`);
+    // Sending bootstrap to server
     this._sendToWorld({
       t: "bootstrapUpload",
       worldId: "local", // Will be overridden by server
       version: 1,
       payload,
     });
-    console.log(`✅ Bootstrap sent to server`);
+    // Bootstrap sent
   }
 
   // Send WebRTC signaling
@@ -294,10 +294,10 @@ export class NetworkClient {
   }
 
   _handleMatchmakerMessage(msg) {
-    console.log("← Matchmaker:", msg.t);
+    // Matchmaker message received
 
     if (msg.t === "status") {
-      console.log(`  Status: ${msg.msg}`);
+      // Status message
     }
 
     if (msg.t === "err") {
@@ -311,7 +311,7 @@ export class NetworkClient {
   _handleWorldMessage(msg) {
     // Skip logging noisy messages
     if (msg.t !== "voicePeers" && msg.t !== "s") {
-      console.log("← World:", msg.t, msg);
+      // World message received
     }
 
     switch (msg.t) {
@@ -320,14 +320,14 @@ export class NetworkClient {
         break;
 
       case "bootstrapRequired":
-        console.log("← Bootstrap required (first player)");
+        // Bootstrap required (first player)
         if (this.onBootstrapRequired) {
           this.onBootstrapRequired();
         }
         break;
 
       case "bootstrapData":
-        console.log("← Bootstrap data received");
+        // Bootstrap data received
         if (this.onBootstrapData) {
           this.onBootstrapData(msg.payload);
         }

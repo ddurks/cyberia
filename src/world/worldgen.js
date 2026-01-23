@@ -4,11 +4,18 @@
 export class WorldGenerator {
   constructor(seed = 12345) {
     this.seed = seed;
+    this.rngState = seed;
+  }
+
+  // Seeded random number generator (0 to 1)
+  _seededRandom() {
+    this.rngState = (this.rngState * 1664525 + 1013904223) % 4294967296;
+    return this.rngState / 4294967296;
   }
 
   // Generate world bootstrap payload
   generateBootstrap(width = 256, depth = 256, cellSize = 1.0) {
-    console.log(`🗺️  Generating world bootstrap with seed ${this.seed}`);
+    // Generating world bootstrap
 
     // Generate heightmap for tree placement only
     const heightmap = this.generateHeightmap(width, depth, cellSize);
@@ -64,25 +71,39 @@ export class WorldGenerator {
     };
   }
 
-  // Generate tree instances
+  // Generate tree instances with perlin noise clumping
   generateInstances(heightmap, width, depth, cellSize) {
     const trees = [];
-    const numTrees = Math.min(500, width * depth * 0.01); // 1% tree coverage, max 500
+    const numTrees = Math.min(1500, width * depth * 0.03); // 3x more: 3% tree coverage, max 1500
+    const treeTypes = ["tree001", "tree002", "tree003", "tree004"]; // Available tree types
 
     for (let i = 0; i < numTrees; i++) {
-      const x = (Math.random() * width - width / 2) * cellSize;
-      const z = (Math.random() * depth - depth / 2) * cellSize;
+      const x = (this._seededRandom() * width - width / 2) * cellSize;
+      const z = (this._seededRandom() * depth - depth / 2) * cellSize;
+
+      // Use perlin noise for clumping (scale determines cluster size)
+      const clumpNoise = this._perlin(x * 0.05, z * 0.05);
+
+      // Skip if perlin noise is negative (creates natural gaps)
+      if (clumpNoise < -0.3) continue;
+
       const y = this._getHeightAt(heightmap, x, z, cellSize);
 
       // Skip if underwater or too steep
       if (y < 0) continue;
 
+      // Deterministic tree type based on position (so all clients see same type)
+      const typeNoise = this._noise(x * 0.1, z * 0.1);
+      const typeIndex =
+        Math.floor((typeNoise + 1) * 0.5 * treeTypes.length) % treeTypes.length;
+
       trees.push({
         x,
         y,
         z,
-        yaw: Math.random() * Math.PI * 2,
-        scale: 0.8 + Math.random() * 0.4,
+        yaw: this._seededRandom() * Math.PI * 2, // Use seeded random for yaw
+        scale: 1.0 + this._seededRandom(), // Scale between 1.0 and 2.0 with seeded random
+        type: treeTypes[typeIndex], // Include tree type in bootstrap
       });
     }
 
@@ -94,31 +115,46 @@ export class WorldGenerator {
     ];
   }
 
-  // Generate AABB colliders for trees
+  // Generate cylinder colliders for trees (matches client Cannon.js cylinders)
   generateColliders(instances) {
-    const aabbs = [];
+    const cylinders = [];
     const treeGroup = instances.find((g) => g.kind === "tree");
 
     if (treeGroup) {
+      // Generating cylinder colliders
+
       for (const tree of treeGroup.positions) {
-        // Limit to 200 colliders
-        const radius = 1.5 * (tree.scale || 1);
-        aabbs.push({
-          min: {
-            x: tree.x - radius,
-            y: tree.y,
-            z: tree.z - radius,
+        // Estimate dimensions based on scale (will be refined when actual geometry loads on client)
+        // These values roughly match the client's bbox calculation
+        const scale = tree.scale || 1.0;
+        const estimatedBBoxWidth = 2.0 * scale; // Rough tree width
+        const estimatedBBoxDepth = 2.0 * scale;
+        const height = 8.0 * scale; // Rough tree height
+        const radius = (estimatedBBoxWidth + estimatedBBoxDepth) * 0.15; // Matches client's 0.15 factor
+
+        cylinders.push({
+          position: {
+            x: tree.x,
+            y: tree.y + height / 2, // Cylinder center is at half height
+            z: tree.z,
           },
-          max: {
-            x: tree.x + radius,
-            y: tree.y + 5 * (tree.scale || 1),
-            z: tree.z + radius,
+          quaternion: {
+            x: 0,
+            y: Math.sin(tree.yaw / 2), // Convert yaw to quaternion
+            z: 0,
+            w: Math.cos(tree.yaw / 2),
           },
+          radius,
+          height,
         });
       }
+
+      // Cylinder colliders generated
+    } else {
+      // No tree group found
     }
 
-    return { aabbs };
+    return { cylinders };
   }
 
   // Simple 2D noise function (replace with better noise if available)
@@ -129,6 +165,29 @@ export class WorldGenerator {
 
     const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
     return (n - Math.floor(n)) * 2 - 1;
+  }
+
+  // Perlin-like noise for smoother clumping
+  _perlin(x, z) {
+    const xi = Math.floor(x);
+    const zi = Math.floor(z);
+    const xf = x - xi;
+    const zf = z - zi;
+
+    // Fade curves
+    const u = xf * xf * (3 - 2 * xf);
+    const v = zf * zf * (3 - 2 * zf);
+
+    // Hash corner values
+    const a = this._noise(xi, zi);
+    const b = this._noise(xi + 1, zi);
+    const c = this._noise(xi, zi + 1);
+    const d = this._noise(xi + 1, zi + 1);
+
+    // Bilinear interpolation
+    const x1 = a * (1 - u) + b * u;
+    const x2 = c * (1 - u) + d * u;
+    return x1 * (1 - v) + x2 * v;
   }
 
   // Get procedural height at any world position

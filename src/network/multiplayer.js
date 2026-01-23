@@ -27,22 +27,20 @@ export class MultiplayerManager {
 
     // Debug: occasionally log raw snapshot data
     if (Math.random() < 0.01) {
-      console.log("📦 Snapshot:", snapshot.p.length, "players");
+      // Snapshot received
     }
 
-    // Update ALL players including self from server (server-authoritative)
+    // Handle local player state from server (server sends it in 'you' field)
+    if (snapshot.you && snapshot.you.id === this.localPlayerId) {
+      if (this.onServerState) {
+        this.onServerState(snapshot.you);
+      }
+    }
+
+    // Update ALL other players from server
     const currentPlayerIds = new Set();
 
     for (const playerData of snapshot.p) {
-      // Skip local player - we use client-side prediction
-      if (playerData.id === this.localPlayerId) {
-        // Store server state for reconciliation
-        if (this.onServerState) {
-          this.onServerState(playerData);
-        }
-        continue;
-      }
-
       currentPlayerIds.add(playerData.id);
 
       if (
@@ -64,7 +62,7 @@ export class MultiplayerManager {
 
     // Debug: log player count occasionally
     if (Math.random() < 0.01) {
-      console.log("📊 Network players:", this.networkPlayers.size);
+      // Network players updated
     }
   }
 
@@ -122,7 +120,7 @@ export class MultiplayerManager {
       }
 
       this.scene.add(model);
-      console.log("✅ Network player added:", playerData.name);
+      // Network player added
 
       this.networkPlayers.set(playerData.id, {
         model,
@@ -163,7 +161,7 @@ export class MultiplayerManager {
 
   // Remove network player
   _removeNetworkPlayer(playerId) {
-    console.log("➖ Removing network player:", playerId);
+    // Removing network player
 
     const player = this.networkPlayers.get(playerId);
     if (player) {
@@ -177,13 +175,14 @@ export class MultiplayerManager {
     for (const [playerId, player] of this.networkPlayers) {
       if (!player.model) continue;
 
-      // Smooth interpolation for XZ, instant snap for Y (server has authoritative terrain)
-      // Server Y includes capsule radius offset, so we subtract to match terrain
+      // Smooth interpolation to target position (lower factor = smoother but more lag)
+      const lerpFactor = 0.15; // Gentle interpolation for smoothness
       player.model.position.x +=
-        (player.targetPosition.x - player.model.position.x) * 0.3;
-      player.model.position.y = player.targetPosition.y - 0.35; // Subtract capsule radius to match terrain
+        (player.targetPosition.x - player.model.position.x) * lerpFactor;
+      player.model.position.y +=
+        (player.targetPosition.y - 0.35 - player.model.position.y) * lerpFactor; // Subtract capsule radius
       player.model.position.z +=
-        (player.targetPosition.z - player.model.position.z) * 0.3;
+        (player.targetPosition.z - player.model.position.z) * lerpFactor;
 
       // Calculate rotation from velocity direction (like local player does)
       const speed = Math.sqrt(

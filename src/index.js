@@ -2,18 +2,18 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import * as CANNON from "cannon";
-import { NetworkClient } from "./src/network/network.js";
-import { MultiplayerManager } from "./src/network/multiplayer.js";
-import { WorldGenerator } from "./src/world/worldgen.js";
-import { getNetworkConfig } from "./src/core/config.js";
+import { NetworkClient } from "./network/network.js";
+import { MultiplayerManager } from "./network/multiplayer.js";
+import { WorldGenerator } from "./world/worldgen.js";
+import { getNetworkConfig } from "./core/config.js";
 import {
   CharacterControls,
   footBoneNames,
-} from "./src/player/characterControls.js";
-import { Level } from "./src/world/level.js";
-import { SnowPuffSystem } from "./src/effects/snowPuffs.js";
-import { FootprintSystem } from "./src/effects/footprints.js";
-import { WindSystem } from "./src/effects/wind.js";
+} from "./player/characterControls.js";
+import { Level } from "./world/level.js";
+import { SnowPuffSystem } from "./effects/snowPuffs.js";
+import { FootprintSystem } from "./effects/footprints.js";
+import { WindSystem } from "./effects/wind.js";
 import {
   W,
   A,
@@ -23,7 +23,7 @@ import {
   SHIFT,
   DIRECTIONS,
   JOY_DIRS,
-} from "./src/core/constants.js";
+} from "./core/constants.js";
 
 var IS_MOBILE;
 if (
