@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import * as CANNON from "cannon";
+import * as CANNON from "cannon-es";
+import Stats from "stats.js";
 import { NetworkClient } from "./network/network.js";
 import { MultiplayerManager } from "./network/multiplayer.js";
 import { WorldGenerator } from "./world/worldgen.js";
@@ -70,16 +71,21 @@ let serverTarget = null;
 let lastServerUpdate = 0;
 let serverUpdateInterval = 0;
 
+// Generate random coat color early so it's available for network connection
+const randomCoatColor = {
+  r: Math.random(),
+  g: Math.random(),
+  b: Math.random()
+};
+
 // Initialize multiplayer
 if (MULTIPLAYER_ENABLED) {
-  console.log("🎮 Initializing multiplayer...");
   // guy and footprintSystem are not defined yet, will be set later
   multiplayerManager = new MultiplayerManager(scene, null, null);
   networkClient = new NetworkClient();
   worldGenerator = new WorldGenerator(Date.now());
 
   networkClient.onConnected = (playerId) => {
-    console.log("✅ Connected as player:", playerId);
     multiplayerManager.setLocalPlayerId(playerId);
     document.getElementById("online-status").className = "online";
   };
@@ -112,19 +118,6 @@ if (MULTIPLAYER_ENABLED) {
         z: serverState.z,
         timestamp: now,
       };
-
-      // Debug occasionally
-      if (Math.random() < 0.01) {
-        const dx = serverState.x - body.position.x;
-        const dz = serverState.z - body.position.z;
-        const errorXZ = Math.sqrt(dx * dx + dz * dz);
-        console.log(
-          "📊 Server error XZ:",
-          errorXZ.toFixed(3),
-          "interval:",
-          serverUpdateInterval.toFixed(0) + "ms",
-        );
-      }
     };
   }
 
@@ -143,14 +136,17 @@ if (MULTIPLAYER_ENABLED) {
 
   // Connect to backend
   const config = getNetworkConfig();
-  if (config.mode === "matchmaker") {
+  if (config.mode === "direct") {
+    // Local development: direct connection to world server
+    const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
+    networkClient
+      .connectDirectly(config.worldServerUrl, LOCAL_DEV_TOKEN, randomCoatColor)
+      .catch((err) => console.error("❌ Network error:", err));
+  } else if (config.mode === "matchmaker") {
+    // Production: connect through matchmaker
     networkClient
       .connectToMatchmaker(config.matchmakerUrl)
       .then(() => networkClient.createAndJoinWorld("cyberia"))
-      .catch((err) => console.error("❌ Network error:", err));
-  } else if (config.mode === "direct") {
-    networkClient
-      .connectToWorld(config.worldServerUrl)
       .catch((err) => console.error("❌ Network error:", err));
   }
 }
@@ -281,9 +277,16 @@ gLoader.load("./assets/snowytrees.glb", (gltf) => {
 
 gLoader.load("./assets/cyberian.glb", (gltf) => {
   gltf.scene.traverse(function (object) {
-    if (object.isMesh) object.castShadow = true;
+    if (object.isMesh) {
+      object.castShadow = true;
+      // Apply random color to snowsuit material
+      if (object.material && object.material.name === "snowsuit") {
+        object.material.color.setRGB(randomCoatColor.r, randomCoatColor.g, randomCoatColor.b);
+      }
+    }
   });
   guy = gltf.scene.children[0];
+  guy.userData.coatColor = randomCoatColor; // Store for later
   guy.position.set(0, 1, 0);
   guy.scale.set(0.25, 0.25, 0.25);
   scene.add(guy);

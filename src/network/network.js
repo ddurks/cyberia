@@ -73,8 +73,9 @@ export class NetworkClient {
   }
 
   // Connect directly to world server (bypass matchmaker for local dev)
-  async connectDirectly(worldServerUrl, token) {
+  async connectDirectly(worldServerUrl, token, coatColor) {
     this.token = token;
+    this.coatColor = coatColor;
     this.worldEndpoint = { url: worldServerUrl };
     await this._connectToWorldServer();
   }
@@ -242,51 +243,72 @@ export class NetworkClient {
 
   async _connectToWorldServer() {
     return new Promise((resolve, reject) => {
-      console.log(`🌍 Connecting to world server: ${this.worldEndpoint.url}`);
+      try {
+        this.worldWs = new WebSocket(this.worldEndpoint.url);
+      } catch (error) {
+        reject(error);
+        return;
+      }
 
-      this.worldWs = new WebSocket(this.worldEndpoint.url);
+      // Connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (!this.authenticated) {
+          this.worldWs.close();
+          reject(new Error("Connection timeout"));
+        }
+      }, 10000);
 
       this.worldWs.onopen = () => {
-        console.log("✓ Connected to world server");
-
         // Authenticate
-        this._sendToWorld({
-          t: "auth",
-          token: this.token,
-        });
+        try {
+          this._sendToWorld({
+            t: "auth",
+            token: this.token,
+          });
 
-        // Immediately send join after auth
-        // (server will queue it until auth completes)
-        this._sendToWorld({
-          t: "join",
-          name: "Player",
-        });
+          // Immediately send join after auth
+          // (server will queue it until auth completes)
+          this._sendToWorld({
+            t: "join",
+            name: "Player",
+            coatColor: this.coatColor,
+          });
+        } catch (error) {
+          console.error("Connection error:", error);
+          clearTimeout(connectionTimeout);
+          reject(error);
+        }
       };
 
       this.worldWs.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        this._handleWorldMessage(msg);
+        try {
+          const msg = JSON.parse(event.data);
+          this._handleWorldMessage(msg);
 
-        if (msg.t === "welcome") {
-          this.authenticated = true;
-          this.joined = true;
-          this.connected = true; // Mark as fully connected
-          this.playerId = msg.playerId;
-          console.log("✓ Joined world as", this.playerId);
-          if (this.onConnected) {
-            this.onConnected(this.playerId);
+          if (msg.t === "welcome") {
+            clearTimeout(connectionTimeout);
+            this.authenticated = true;
+            this.joined = true;
+            this.connected = true; // Mark as fully connected
+            this.playerId = msg.playerId;
+            if (this.onConnected) {
+              this.onConnected(this.playerId);
+            }
+            resolve();
           }
-          resolve();
+        } catch (error) {
+          console.error("Error processing message:", error);
         }
       };
 
       this.worldWs.onerror = (error) => {
-        console.error("World server error:", error);
+        console.error("Connection error:", error);
+        clearTimeout(connectionTimeout);
         reject(error);
       };
 
-      this.worldWs.onclose = () => {
-        console.log("World server connection closed");
+      this.worldWs.onclose = (event) => {
+        clearTimeout(connectionTimeout);
         this.authenticated = false;
         this.joined = false;
       };

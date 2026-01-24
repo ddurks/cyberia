@@ -1,21 +1,26 @@
 // Configuration for connecting to backend
 // Switch between local development and production
 
-export const NetworkConfig = {
-  // Local development (use local matchmaker)
-  LOCAL: {
-    matchmakerUrl: "ws://localhost:8080",
-    mode: "matchmaker",
-  },
+// Get the host IP from URL (for network access) or use localhost
+const getServerHost = () => {
+  // If accessing via IP (e.g., 192.168.1.x:3000), use that IP for server
+  const hostname = window.location.hostname;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return hostname; // Use same IP as frontend
+  }
+  return 'localhost';
+};
 
-  // Local development (direct to world server, bypass matchmaker)
+export const NetworkConfig = {
+  // Local development (direct to world server)
   LOCAL_DIRECT: {
-    worldServerUrl: "ws://localhost:7777",
-    token: null, // Will be generated
+    get worldServerUrl() {
+      return `ws://${getServerHost()}:7777`;
+    },
     mode: "direct",
   },
 
-  // Production (AWS deployment)
+  // Production (AWS deployment with matchmaker)
   PRODUCTION: {
     matchmakerUrl: "wss://your-api-id.execute-api.us-east-2.amazonaws.com/prod",
     mode: "matchmaker",
@@ -23,29 +28,11 @@ export const NetworkConfig = {
 };
 
 // Current environment
-export const CURRENT_ENV = "LOCAL"; // Change to 'LOCAL_DIRECT' or 'PRODUCTION'
+export const CURRENT_ENV = "LOCAL_DIRECT"; // Change to 'LOCAL_DIRECT' or 'PRODUCTION'
 
 export function getNetworkConfig() {
   return NetworkConfig[CURRENT_ENV];
 }
 
-// Helper to generate JWT for direct connection (local dev only)
-export function generateLocalToken(
-  playerId,
-  gameKey = "cyberia",
-  worldId = "local",
-) {
-  // In production, this would be done by matchmaker
-  // For local dev, we can generate a simple token
-  const payload = {
-    sub: playerId,
-    gameKey,
-    worldId,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 900, // 15 minutes
-  };
-
-  // Simple base64 encoding (NOT SECURE - only for local dev!)
-  // In production, this uses proper JWT signing
-  return btoa(JSON.stringify(payload));
-}
+// Local dev bypass token
+export const LOCAL_DEV_TOKEN = "local-dev-bypass";

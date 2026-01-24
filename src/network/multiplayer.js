@@ -88,6 +88,14 @@ export class MultiplayerManager {
         if (object.isMesh) {
           object.castShadow = true;
           object.receiveShadow = true;
+          // Apply player's coat color if available
+          if (object.material && object.material.name === "snowsuit" && playerData.coatColor) {
+            object.material.color.setRGB(
+              playerData.coatColor.r,
+              playerData.coatColor.g,
+              playerData.coatColor.b
+            );
+          }
         }
       });
 
@@ -127,6 +135,7 @@ export class MultiplayerManager {
         mixer,
         animationsMap,
         currentAnimation: "idle",
+        coatColor: playerData.coatColor,
         targetPosition: new THREE.Vector3(
           playerData.x,
           playerData.y,

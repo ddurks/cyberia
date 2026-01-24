@@ -3,7 +3,7 @@
  * Handles terrain generation, tree placement, snowfall effects, and camera obstruction
  */
 import * as THREE from "three";
-import * as CANNON from "cannon";
+import * as CANNON from "cannon-es";
 
 export class Level {
   spawnedPlanes = new Set();

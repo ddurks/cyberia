@@ -1,3 +1,5 @@
+import nipplejs from "nipplejs";
+
 /**
  * Joystick input handler for mobile controls
  * Uses nipplejs library for touch-based movement input
