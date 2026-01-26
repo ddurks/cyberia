@@ -118,6 +118,7 @@ export class WorldGenerator {
   // Generate cylinder colliders for trees (matches client Cannon.js cylinders)
   generateColliders(instances) {
     const cylinders = [];
+    const aabbs = [];
     const treeGroup = instances.find((g) => g.kind === "tree");
 
     if (treeGroup) {
@@ -154,7 +155,38 @@ export class WorldGenerator {
       // No tree group found
     }
 
-    return { cylinders };
+    // Add invisible boundary walls (3x3 grid = 300x300 world)
+    const wallHeight = 50;
+    const wallDepth = 50;
+    const wallThickness = 10;
+    const boundary = 150;
+
+    aabbs.push({
+      min: { x: -boundary - wallThickness, y: -wallDepth, z: boundary },
+      max: {
+        x: boundary + wallThickness,
+        y: wallHeight,
+        z: boundary + wallThickness,
+      },
+    });
+    aabbs.push({
+      min: {
+        x: -boundary - wallThickness,
+        y: -wallDepth,
+        z: -boundary - wallThickness,
+      },
+      max: { x: boundary + wallThickness, y: wallHeight, z: -boundary },
+    });
+    aabbs.push({
+      min: { x: boundary, y: -wallDepth, z: -boundary },
+      max: { x: boundary + wallThickness, y: wallHeight, z: boundary },
+    });
+    aabbs.push({
+      min: { x: -boundary - wallThickness, y: -wallDepth, z: -boundary },
+      max: { x: -boundary, y: wallHeight, z: boundary },
+    });
+
+    return { cylinders, aabbs };
   }
 
   // Simple 2D noise function (replace with better noise if available)

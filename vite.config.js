@@ -11,10 +11,18 @@ export default defineConfig({
     // Proxy WebSocket connections to work around iOS Safari WebSocket bug
     proxy: {
       '/ws': {
-        target: 'ws://localhost:7777',
+        target: 'http://localhost:7777',
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ''),
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.log('Proxy error:', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('Proxying WS request to:', proxyReq.path);
+          });
+        },
       },
     },
   },

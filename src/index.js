@@ -87,17 +87,30 @@ if (MULTIPLAYER_ENABLED) {
 
   networkClient.onConnected = (playerId) => {
     multiplayerManager.setLocalPlayerId(playerId);
-    document.getElementById("online-status").className = "online";
+    _playerJustConnected = true;
+    const onlineStatusDiv = document.getElementById("online-status");
+    if (onlineStatusDiv) onlineStatusDiv.className = "online";
+    const statusText = document.getElementById("status-text");
+    if (statusText)
+      statusText.innerHTML = "online: <span class='count'>1</span>";
   };
 
   networkClient.onSnapshot = (snapshot) => {
     if (multiplayerManager) {
       multiplayerManager.handleSnapshot(snapshot);
+      _msgRecvCount++; // Track received messages
+
+      // Calculate ping from server timestamp
+      if (snapshot.t && _pingStart > 0) {
+        _pingTime = performance.now() - _pingStart;
+      }
+      _pingStart = performance.now(); // Start new ping measurement
+
       // Update online count (snapshot.p contains other players, +1 for self)
       const statusText = document.getElementById("status-text");
       if (statusText && snapshot.p) {
         const count = snapshot.p.length + 1;
-        statusText.innerHTML = `online: <span class="count">${count}</span>`;
+        statusText.innerHTML = `online: <span class='count'>${count}</span>`;
       }
     }
   };
@@ -155,6 +168,13 @@ if (MULTIPLAYER_ENABLED) {
         .catch((err) => console.error("❌ Network error:", err));
     }
   };
+
+  networkClient.onDisconnected = () => {
+    const onlineStatusDiv = document.getElementById("online-status");
+    if (onlineStatusDiv) onlineStatusDiv.className = "offline";
+    const statusText = document.getElementById("status-text");
+    if (statusText) statusText.innerHTML = "offline";
+  };
 }
 
 const world = new CANNON.World();
@@ -166,6 +186,7 @@ const canvas = document.getElementById("three-canvas");
 const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
   antialias: true,
+  powerPreference: "high-performance",
 });
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setSize(
@@ -177,9 +198,20 @@ renderer.setPixelRatio(IS_MOBILE ? 1 : window.devicePixelRatio);
 renderer.shadowMap.enabled = !IS_MOBILE;
 
 const stats = new Stats();
-stats.showPanel(0);
-stats.dom.style.display = "none"; // Hidden for footage
-document.body.appendChild(stats.dom);
+stats.showPanel(1); // 0: fps, 1: ms, 2: mb
+stats.dom.id = "stats";
+stats.dom.style.display = "block";
+stats.dom.style.cssText +=
+  ";position:absolute;top:18px;left:18px;z-index:200;opacity:0.9;pointer-events:none;";
+document.getElementById("hud-container").appendChild(stats.dom);
+
+// Network performance stats display
+const networkStats = document.createElement("div");
+networkStats.id = "network-stats";
+networkStats.innerHTML = "Ping: -- ms<br>Sent: 0 msg/s<br>Recv: 0 msg/s";
+networkStats.style.cssText =
+  "position:absolute;top:64px;left:18px;z-index:200;opacity:0.9;pointer-events:none;background:#020;padding:6px;border-radius:4px;color:#0f0;font-family:monospace;font-size:8px;line-height:1.2;";
+document.getElementById("hud-container").appendChild(networkStats);
 
 const camera = new THREE.PerspectiveCamera(
   50,
@@ -208,6 +240,11 @@ world.addContactMaterial(physicsContactMaterial);
 const fogColor = 0xddeeff; // Soft blueish-grey
 scene.fog = new THREE.Fog(fogColor, 20, 70);
 scene.background = new THREE.Color(fogColor);
+
+// Store initial fog values for dynamic adjustment
+const baseFogNear = 20;
+const baseFogFar = 70;
+const mapBoundary = 150; // Must match worldgen.js boundary
 
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
@@ -363,19 +400,39 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
 
 const clock = new THREE.Clock();
 let frameCount = 0;
+
+// Reusable vectors for game loop (avoid allocations)
+const _cameraDirection = new THREE.Vector3();
+const _cameraRight = new THREE.Vector3();
+const _worldDir = new THREE.Vector3();
+const _upVector = new THREE.Vector3(0, 1, 0);
+
+// Input change detection (optimize network traffic)
+let _lastSentInput = { mx: 0, mz: 0, yaw: 0, jump: false };
+let _lastInputSendFrame = 0;
+
+// Network performance tracking
+let _msgSentCount = 0;
+let _msgRecvCount = 0;
+let _lastNetStatsUpdate = 0;
+let _pingTime = 0;
+let _pingStart = 0;
+let _playerJustConnected = false;
+
 function animate() {
   stats.begin();
   let deltaT = clock.getDelta();
-
-  // Clamp deltaT to prevent huge jumps on tab switch or lag
-  deltaT = Math.min(deltaT, 0.1);
 
   if (characterControls) {
     // Apply movement BEFORE physics step (matches server)
     characterControls.update(deltaT, keysPressed, body, raycaster, downVector);
 
     // Update tree collisions BEFORE physics step so bodies exist during collision detection
-    level.updateTreeCollisions(characterControls.model.position);
+    level.updateTreeCollisions(
+      characterControls.model.position,
+      20,
+      body.velocity,
+    );
   }
 
   // Use variable timestep for smooth physics at any framerate
@@ -418,25 +475,34 @@ function animate() {
         );
         const yError = Math.abs(targetY - body.position.y);
 
-        // Use a blend factor based on how recent the update is
-        // Decay over 100ms since snapshots arrive every ~33ms at 30Hz
-        const updateFreshness = Math.max(0, 1 - timeSinceUpdate / 100);
-        const blendFactor = 0.1 * updateFreshness; // Reduced from 0.2 to avoid fighting
+        // Don't reconcile if player is actively moving - trust client prediction
+        // Only reconcile when idle or when error is huge (>2 units = major desync)
+        const isActivelyMoving = Math.sqrt(
+          body.velocity.x * body.velocity.x + body.velocity.z * body.velocity.z
+        ) > 1.0;
+        const isMajorDesync = xzError > 2.0;
 
-        // Only reconcile XZ if error is significant enough to avoid micro-jitter
-        // Dead zone: ignore errors under 0.05 units
-        if (xzError > 0.05) {
-          body.position.x += (targetX - body.position.x) * blendFactor;
-          body.position.z += (targetZ - body.position.z) * blendFactor;
-        }
+        if (!isActivelyMoving || isMajorDesync) {
+          // Use a blend factor based on how recent the update is
+          // Decay over 100ms since snapshots arrive every ~33ms at 30Hz
+          const updateFreshness = Math.max(0, 1 - timeSinceUpdate / 100);
+          const blendFactor = 0.1 * updateFreshness; // Reduced from 0.2 to avoid fighting
 
-        // Only blend Y when actually jumping/falling - never when grounded
-        // This prevents ground jitter from terrain collision differences
-        const isActuallyAirborne =
-          characterControls.isJumping && Math.abs(body.velocity.y) > 1.0;
+          // Only reconcile XZ if error is significant enough to avoid micro-jitter
+          // Dead zone: ignore errors under 0.05 units
+          if (xzError > 0.05) {
+            body.position.x += (targetX - body.position.x) * blendFactor;
+            body.position.z += (targetZ - body.position.z) * blendFactor;
+          }
 
-        if (isActuallyAirborne && yError > 0.5) {
-          body.position.y += (targetY - body.position.y) * blendFactor * 0.3; // Very gentle Y blend
+          // Only blend Y when actually jumping/falling - never when grounded
+          // This prevents ground jitter from terrain collision differences
+          const isActuallyAirborne =
+            characterControls.isJumping && Math.abs(body.velocity.y) > 1.0;
+
+          if (isActuallyAirborne && yError > 0.5) {
+            body.position.y += (targetY - body.position.y) * blendFactor * 0.3; // Very gentle Y blend
+          }
         }
       }
       // else: Server updates too old, trust client physics completely
@@ -451,18 +517,17 @@ function animate() {
     level.handleCameraObstruction(camera, characterControls);
     updateShadowPosition();
     updatePlayerFootsteps();
+    updateDistanceBasedFog(characterControls.model.position);
 
     // Send input to server (every other frame = 30fps to avoid rate limits)
     if (networkClient && networkClient.connected && frameCount % 2 === 0) {
       // Get camera direction (same as CharacterControls uses)
-      const cameraDirection = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      cameraDirection.y = 0;
-      cameraDirection.normalize();
+      camera.getWorldDirection(_cameraDirection);
+      _cameraDirection.y = 0;
+      _cameraDirection.normalize();
 
-      const cameraRight = new THREE.Vector3();
-      cameraRight.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
-      cameraRight.normalize();
+      _cameraRight.crossVectors(_cameraDirection, _upVector);
+      _cameraRight.normalize();
 
       // Get input from WASD or joystick
       let inputForward = 0,
@@ -480,13 +545,12 @@ function animate() {
       }
 
       // Transform to world space (same as CharacterControls)
-      const worldDir = new THREE.Vector3();
-      worldDir.copy(cameraDirection).multiplyScalar(inputForward);
-      worldDir.add(cameraRight.clone().multiplyScalar(inputRight));
+      _worldDir.copy(_cameraDirection).multiplyScalar(inputForward);
+      _worldDir.addScaledVector(_cameraRight, inputRight);
 
       // Normalize
-      const len = worldDir.length();
-      if (len > 1) worldDir.divideScalar(len);
+      const len = _worldDir.length();
+      if (len > 1) _worldDir.divideScalar(len);
 
       // Transform world direction to character-local space for server
       // Character forward is -Z at rotation 0
@@ -494,13 +558,17 @@ function animate() {
       const cosYaw = Math.cos(-yaw); // Negate because rotation is opposite
       const sinYaw = Math.sin(-yaw);
 
-      const localMx = worldDir.x * cosYaw - worldDir.z * sinYaw;
-      const localMz = worldDir.x * sinYaw + worldDir.z * cosYaw;
+      const localMx = _worldDir.x * cosYaw - _worldDir.z * sinYaw;
+      const localMz = _worldDir.x * sinYaw + _worldDir.z * cosYaw;
 
       const jumpPressed =
         keysPressed[SPACE] || characterControls.aPressed || false;
 
-      networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
+      // Send input every other frame (30Hz) to match server tick rate
+      if (frameCount % 2 === 0) {
+        networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
+        _msgSentCount++;
+      }
     }
 
     if (frameCount % 10 === 0) {
@@ -520,7 +588,60 @@ function animate() {
   renderer.render(scene, camera);
   frameCount++;
   stats.end();
+
+  // Update network stats display (once per second)
+  const now = performance.now();
+  if (now - _lastNetStatsUpdate > 1000) {
+    networkStats.innerHTML =
+      `Ping: ${_pingTime.toFixed(0)} ms<br>` +
+      `Sent: ${_msgSentCount} msg/s<br>Recv: ${_msgRecvCount} msg/s`;
+    _msgSentCount = 0;
+    _msgRecvCount = 0;
+    _lastNetStatsUpdate = now;
+  }
+
   requestAnimationFrame(animate);
+}
+
+function updateDistanceBasedFog(playerPos) {
+  // Calculate distance from player to nearest map edge
+  const distToEdgeX = Math.min(
+    Math.abs(playerPos.x - mapBoundary),
+    Math.abs(playerPos.x + mapBoundary),
+  );
+  const distToEdgeZ = Math.min(
+    Math.abs(playerPos.z - mapBoundary),
+    Math.abs(playerPos.z + mapBoundary),
+  );
+  const distToNearestEdge = Math.min(distToEdgeX, distToEdgeZ);
+
+  // Define fog zones:
+  // - Inner safe zone (> 100 units from edge): normal fog
+  // - Transition zone (50-100 units from edge): progressive fog thickening
+  // - Heavy fog zone (< 50 units from edge): very thick fog, player nearly invisible at edge
+  const innerZone = 100;
+  const transitionZone = 50;
+
+  let fogMultiplier = 1.0;
+
+  if (distToNearestEdge < innerZone) {
+    if (distToNearestEdge < transitionZone) {
+      // Heavy fog zone: 0-50 units from edge
+      // At edge (0), fog is 10x thicker; at 50 units, fog is 2x thicker
+      const edgeProximity = 1 - distToNearestEdge / transitionZone;
+      fogMultiplier = 2.0 + edgeProximity * 8.0; // Ranges from 2.0 to 10.0
+    } else {
+      // Transition zone: 50-100 units from edge
+      // Gradually increase fog from 1x to 2x
+      const transitionFactor =
+        1 - (distToNearestEdge - transitionZone) / (innerZone - transitionZone);
+      fogMultiplier = 1.0 + transitionFactor; // Ranges from 1.0 to 2.0
+    }
+  }
+
+  // Apply fog adjustment (reduce fog distance = thicker fog)
+  scene.fog.near = baseFogNear / fogMultiplier;
+  scene.fog.far = baseFogFar / fogMultiplier;
 }
 
 function updateShadowPosition() {
@@ -575,7 +696,7 @@ function checkAndStartGame() {
   const loadingBG = document.getElementById("loading-bg");
 
   if (!loading || !loadingBG) {
-    animate();
+    requestAnimationFrame(animate);
     return;
   }
 
@@ -597,7 +718,7 @@ function checkAndStartGame() {
     if (loadingBG.parentNode) {
       loadingBG.outerHTML = "";
     }
-    animate();
+    requestAnimationFrame(animate);
   }, 1600);
 }
 

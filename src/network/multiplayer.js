@@ -184,21 +184,33 @@ export class MultiplayerManager {
     for (const [playerId, player] of this.networkPlayers) {
       if (!player.model) continue;
 
-      // Smooth interpolation to target position (lower factor = smoother but more lag)
-      const lerpFactor = 0.15; // Gentle interpolation for smoothness
-      player.model.position.x +=
-        (player.targetPosition.x - player.model.position.x) * lerpFactor;
-      player.model.position.y +=
-        (player.targetPosition.y - 0.35 - player.model.position.y) * lerpFactor; // Subtract capsule radius
-      player.model.position.z +=
-        (player.targetPosition.z - player.model.position.z) * lerpFactor;
-
-      // Calculate rotation from velocity direction (like local player does)
+      // Calculate speed from velocity
       const speed = Math.sqrt(
         player.velocity.x * player.velocity.x +
           player.velocity.z * player.velocity.z,
       );
+      
+      // Check if there's distance to travel to target (will be moving this frame)
+      const distanceToTarget = Math.sqrt(
+        Math.pow(player.targetPosition.x - player.model.position.x, 2) +
+          Math.pow(player.targetPosition.z - player.model.position.z, 2),
+      );
 
+      const isStationary = speed < 0.1;
+
+      // Optimize: Skip interpolation for stationary players who are already at target
+      if (!isStationary || distanceToTarget > 0.1) {
+        // Only interpolate if moving OR if there's significant position error
+        const lerpFactor = 0.15; // Gentle interpolation for smoothness
+        player.model.position.x +=
+          (player.targetPosition.x - player.model.position.x) * lerpFactor;
+        player.model.position.y +=
+          (player.targetPosition.y - 0.35 - player.model.position.y) * lerpFactor; // Subtract capsule radius
+        player.model.position.z +=
+          (player.targetPosition.z - player.model.position.z) * lerpFactor;
+      }
+
+      // Calculate rotation from velocity direction (like local player does)
       if (speed > 0.1) {
         // Moving - face movement direction
         const targetAngle =
@@ -230,10 +242,13 @@ export class MultiplayerManager {
         }
       }
 
-      // Update animation based on velocity
+      // Update animation based on whether player has distance to cover
       if (player.mixer && player.animationsMap) {
-        const isMoving = speed > 1.5; // Higher threshold - server velocity is damped
         const isGrounded = player.grounded;
+        
+        // Animate as running if there's significant distance to target position
+        // (the lerp will move them toward it)
+        const isMoving = distanceToTarget > 0.05 && isGrounded;
 
         let targetAnim = "idle";
         if (!isGrounded) {

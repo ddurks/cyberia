@@ -8,28 +8,31 @@ html, body {
 }
 
 #online-status {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  z-index: 1000;
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  font-weight: bold;
-  padding: 8px 16px;
-  border-radius: 4px;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 201;
+  font-family: monospace;
+  font-size: 12px;
+  color: #0f0;
+  padding: 6px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
   pointer-events: none;
-  transition: all 0.3s ease;
+  opacity: 0.95;
+  transition: background 0.3s;
+  background: #020;
 }
 
 #online-status.online {
-  color: #405640;
+  color: #0f0;
   text-shadow: 0 0 10px rgba(0, 255, 0, 0.8),
                0 0 20px rgba(0, 255, 0, 0.6),
                0 0 30px rgba(0, 255, 0, 0.4);
 }
 
 #online-status.online .count {
-  color: #405640;
+  color: #0f0;
   text-shadow: 0 0 10px rgba(0, 255, 0, 0.8),
                0 0 20px rgba(0, 255, 0, 0.6),
                0 0 30px rgba(0, 255, 0, 0.4);
@@ -38,6 +41,15 @@ html, body {
 #online-status.offline {
   color: rgba(128, 128, 128, 0.8);
   animation: flash 2s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.8),
+               0 0 20px rgba(255, 255, 255, 0.6),
+               0 0 30px rgba(255, 255, 255, 0.4);
+}
+
+#network-stats {
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.8),
+               0 0 20px rgba(0, 255, 0, 0.6),
+               0 0 30px rgba(0, 255, 0, 0.4);
 }
 
 @keyframes flash {

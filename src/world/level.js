@@ -22,6 +22,10 @@ export class Level {
   allObstructables = new Set();
   activeObstructables = new Set();
   treeInstancesFromBootstrap = []; // Tree positions from bootstrap
+  wallMeshes = [];
+  wallBodies = [];
+  treeCollisionFrameCounter = 0;
+  snowfallUpdateFrameCounter = 0;
 
   constructor(deps) {
     // Dependencies injection
@@ -68,6 +72,50 @@ export class Level {
         this.placeTreesOnPlane(plane);
       });
     }
+
+    // Create physics bodies for boundary walls from colliders
+    if (bootstrapData.colliders && bootstrapData.colliders.aabbs) {
+      this.createWallPhysicsBodies(bootstrapData.colliders.aabbs);
+    }
+  }
+
+  createWallPhysicsBodies(aabbs) {
+    // Remove existing wall bodies if any
+    if (this.wallBodies) {
+      this.wallBodies.forEach((body) => this.world.removeBody(body));
+    }
+    this.wallBodies = [];
+
+    aabbs.forEach((aabb, index) => {
+      const width = aabb.max.x - aabb.min.x;
+      const height = aabb.max.y - aabb.min.y;
+      const depth = aabb.max.z - aabb.min.z;
+
+      // Create a static box body
+      const shape = new CANNON.Box(
+        new CANNON.Vec3(width / 2, height / 2, depth / 2),
+      );
+      const body = new CANNON.Body({
+        mass: 0, // Static body
+        shape: shape,
+        material: this.physicsMaterial,
+        type: CANNON.Body.STATIC, // Explicitly set as static
+      });
+
+      // Position at center of AABB
+      body.position.set(
+        (aabb.min.x + aabb.max.x) / 2,
+        (aabb.min.y + aabb.max.y) / 2,
+        (aabb.min.z + aabb.max.z) / 2,
+      );
+
+      // Prevent the body from sleeping
+      body.allowSleep = false;
+      body.collisionResponse = true;
+
+      this.world.addBody(body);
+      this.wallBodies.push(body);
+    });
   }
 
   light() {
@@ -83,8 +131,8 @@ export class Level {
     this.sunLight.shadow.camera.right = 50;
     this.sunLight.shadow.camera.near = 0.1;
     this.sunLight.shadow.camera.far = 200;
-    this.sunLight.shadow.mapSize.width = 4096;
-    this.sunLight.shadow.mapSize.height = 4096;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
 
     // softer shadows with more realistic diffusion
     this.sunLight.shadow.radius = 4;
@@ -439,7 +487,22 @@ export class Level {
     return placedTrees;
   }
 
-  updateTreeCollisions(playerPosition, activationRadius = 20) {
+  updateTreeCollisions(
+    playerPosition,
+    activationRadius = 20,
+    playerVelocity = null,
+  ) {
+    // Throttle tree collision updates based on player movement
+    // Active players: every 3 frames, idle players: every 10 frames
+    const isMoving = playerVelocity && playerVelocity.length() > 0.5;
+    const throttleFrames = isMoving ? 3 : 10;
+
+    // TEMPORARILY DISABLED FOR DEBUGGING
+    // this.treeCollisionFrameCounter++;
+    // if (this.treeCollisionFrameCounter % throttleFrames !== 0) {
+    //   return; // Skip this frame
+    // }
+
     this.treeCollisionData.forEach((data) => {
       if (!data || !data.position) return;
 
@@ -551,8 +614,16 @@ export class Level {
   }
 
   initSnowfall() {
+    // Aggressive particle reduction for low-end devices
+    let particleCount = 1000;
+    if (this.isMobile) {
+      // Check for low-end mobile (estimate via navigator API)
+      const isLowEnd = !navigator.deviceMemory || navigator.deviceMemory <= 4;
+      particleCount = isLowEnd ? 250 : 500;
+    }
+
     this.snowConfig = {
-      particleCount: this.isMobile ? 500 : 1000, // Reduced for performance
+      particleCount: particleCount,
       boxSize: this.isMobile ? 50 : 80,
       height: 40,
       fallSpeed: 0.1,
@@ -587,7 +658,7 @@ export class Level {
       map: this.generateSnowflakeTexture(),
     });
     this.snowParticles = new THREE.Points(this.snowGeometry, this.snowMaterial);
-    this.snowParticles.frustumCulled = false;
+    this.snowParticles.frustumCulled = true;
 
     this.scene.add(this.snowParticles);
   }
@@ -595,6 +666,14 @@ export class Level {
   updateSnowfall(wind) {
     if (!this.snowGeometry || !this.snowGeometry.attributes.position) {
       return;
+    }
+
+    // Throttle snowfall updates on mobile: only update every other frame
+    if (this.isMobile) {
+      this.snowfallUpdateFrameCounter++;
+      if (this.snowfallUpdateFrameCounter % 2 !== 0) {
+        return; // Skip update this frame
+      }
     }
 
     const positions = this.snowGeometry.attributes.position.array;
