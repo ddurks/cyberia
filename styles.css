@@ -134,38 +134,29 @@ body.mobile #hud-container {
 #joystickWrapper1 {
   position: absolute;
   pointer-events: auto;
-  left: 75.5%;
-  bottom: 32.5%;
+  left: calc(64%);
+  bottom: calc(48%);
 }
 
+.back {
+  border: none !important;
+}
+
+/* Background for the movable joystick nipple - use actual element property instead of pseudo */
 .front {
   position: relative;
   overflow: visible;
   border: none !important;
-  background: transparent !important;
-  width: 100px;
-  height: 100px;
-}
-
-.front::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 245px;
-  height: 245px;
-  transform: translate(-50%, -50%);
-  background-image: url('assets/hud/cyberia_joystick.png');
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.back {
-  background: transparent !important;
-  border: none;
+  width: 135px !important;
+  height: 135px !important;
+  background-image: url('assets/hud/cyberia_joystick.png') !important;
+  background-size: 400px 400px !important;
+  background-repeat: no-repeat !important;
+  background-position: 50% 50% !important;
+  opacity: 1 !important;
+  /* iOS Safari specific fixes */
+  -webkit-background-size: 400px 400px !important;
+  -webkit-opacity: 1 !important;
 }
 
 #loading {

@@ -75,7 +75,7 @@ let serverUpdateInterval = 0;
 const randomCoatColor = {
   r: Math.random(),
   g: Math.random(),
-  b: Math.random()
+  b: Math.random(),
 };
 
 // Initialize multiplayer
@@ -134,21 +134,27 @@ if (MULTIPLAYER_ENABLED) {
     }
   };
 
-  // Connect to backend
-  const config = getNetworkConfig();
-  if (config.mode === "direct") {
-    // Local development: direct connection to world server
-    const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
-    networkClient
-      .connectDirectly(config.worldServerUrl, LOCAL_DEV_TOKEN, randomCoatColor)
-      .catch((err) => console.error("❌ Network error:", err));
-  } else if (config.mode === "matchmaker") {
-    // Production: connect through matchmaker
-    networkClient
-      .connectToMatchmaker(config.matchmakerUrl)
-      .then(() => networkClient.createAndJoinWorld("cyberia"))
-      .catch((err) => console.error("❌ Network error:", err));
-  }
+  // Store connection config - we'll connect AFTER scene is ready
+  window._pendingNetworkConnection = async () => {
+    const config = getNetworkConfig();
+    if (config.mode === "direct") {
+      // Local development: direct connection to world server
+      const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
+      networkClient
+        .connectDirectly(
+          config.worldServerUrl,
+          LOCAL_DEV_TOKEN,
+          randomCoatColor,
+        )
+        .catch((err) => console.error("❌ Network error:", err));
+    } else if (config.mode === "matchmaker") {
+      // Production: connect through matchmaker
+      networkClient
+        .connectToMatchmaker(config.matchmakerUrl)
+        .then(() => networkClient.createAndJoinWorld("cyberia"))
+        .catch((err) => console.error("❌ Network error:", err));
+    }
+  };
 }
 
 const world = new CANNON.World();
@@ -281,7 +287,11 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
       object.castShadow = true;
       // Apply random color to snowsuit material
       if (object.material && object.material.name === "snowsuit") {
-        object.material.color.setRGB(randomCoatColor.r, randomCoatColor.g, randomCoatColor.b);
+        object.material.color.setRGB(
+          randomCoatColor.r,
+          randomCoatColor.g,
+          randomCoatColor.b,
+        );
       }
     }
   });
@@ -543,10 +553,21 @@ function updatePlayerFootsteps() {
 
 let assetsLoaded = false;
 let loadStartTime = Date.now();
+let networkConnectionInitiated = false; // Prevent multiple connection attempts
 
 THREE.DefaultLoadingManager.onLoad = () => {
   assetsLoaded = true;
   checkAndStartGame();
+
+  // Connect to network AFTER assets are loaded and scene is ready
+  // This prevents main thread blocking during WebSocket handshake on iOS
+  if (window._pendingNetworkConnection && !networkConnectionInitiated) {
+    networkConnectionInitiated = true;
+    // Use setTimeout to ensure we're not blocking
+    setTimeout(() => {
+      window._pendingNetworkConnection();
+    }, 100);
+  }
 };
 
 function checkAndStartGame() {

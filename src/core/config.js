@@ -5,17 +5,27 @@
 const getServerHost = () => {
   // If accessing via IP (e.g., 192.168.1.x:3000), use that IP for server
   const hostname = window.location.hostname;
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "") {
     return hostname; // Use same IP as frontend
   }
-  return 'localhost';
+  return "localhost";
 };
 
 export const NetworkConfig = {
   // Local development (direct to world server)
   LOCAL_DIRECT: {
     get worldServerUrl() {
-      return `ws://${getServerHost()}:7777`;
+      // Support manual IP override via URL parameter for iOS debugging
+      const urlParams = new URLSearchParams(window.location.search);
+      const manualIP = urlParams.get("serverip");
+      if (manualIP) {
+        return `ws://${manualIP}:7777`;
+      }
+
+      // Use Vite proxy to work around iOS Safari WebSocket bug
+      // This allows WebSocket connections from the same origin
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${window.location.host}/ws`;
     },
     mode: "direct",
   },

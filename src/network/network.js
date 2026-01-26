@@ -82,23 +82,6 @@ export class NetworkClient {
 
   // Send input to world server
   sendInput(mx, mz, yaw, jump) {
-    // Debug every call for now
-    if (this.inputSeq % 60 === 0 || !this.worldWs || !this.joined) {
-      console.log(
-        "sendInput called:",
-        "worldWs:",
-        !!this.worldWs,
-        "joined:",
-        this.joined,
-        "seq:",
-        this.inputSeq,
-        "mx:",
-        mx,
-        "mz:",
-        mz,
-      );
-    }
-
     if (!this.worldWs || !this.joined) {
       return;
     }
@@ -243,75 +226,128 @@ export class NetworkClient {
 
   async _connectToWorldServer() {
     return new Promise((resolve, reject) => {
-      try {
-        this.worldWs = new WebSocket(this.worldEndpoint.url);
-      } catch (error) {
-        reject(error);
-        return;
-      }
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-      // Connection timeout
+      // Connection timeout - iOS can be slower
       const connectionTimeout = setTimeout(() => {
         if (!this.authenticated) {
-          this.worldWs.close();
+          if (this.worldWs) {
+            this.worldWs.close();
+          }
           reject(new Error("Connection timeout"));
         }
-      }, 10000);
+      }, 15000); // Increased from 10s to 15s for iOS
 
-      this.worldWs.onopen = () => {
-        // Authenticate
-        try {
-          this._sendToWorld({
-            t: "auth",
-            token: this.token,
-          });
+      // CRITICAL: Create WebSocket and set ALL handlers synchronously
+      // to avoid race condition on fast connections / slow mobile devices
+      try {
+        this.worldWs = new WebSocket(this.worldEndpoint.url);
 
-          // Immediately send join after auth
-          // (server will queue it until auth completes)
-          this._sendToWorld({
-            t: "join",
-            name: "Player",
-            coatColor: this.coatColor,
-          });
-        } catch (error) {
-          console.error("Connection error:", error);
+        // Set binary type explicitly for iOS
+        this.worldWs.binaryType = "arraybuffer";
+
+        // iOS Safari workaround: onopen doesn't always fire reliably
+        // Poll readyState as a backup
+        const readyStatePoller = setInterval(() => {
+          if (!this.worldWs) {
+            clearInterval(readyStatePoller);
+            return;
+          }
+
+          if (this.worldWs.readyState === WebSocket.OPEN) {
+            clearInterval(readyStatePoller);
+
+            // Critical iOS fix: Wait 200ms before sending to ensure message handlers are ready
+            setTimeout(
+              () => {
+                try {
+                  this._sendToWorld({
+                    t: "auth",
+                    token: this.token,
+                  });
+
+                  this._sendToWorld({
+                    t: "join",
+                    name: "Player",
+                    coatColor: this.coatColor,
+                  });
+                } catch (error) {
+                  console.error("Connection error:", error);
+                  clearTimeout(connectionTimeout);
+                  reject(error);
+                }
+              },
+              isIOS ? 200 : 0,
+            );
+          } else if (
+            this.worldWs.readyState === WebSocket.CLOSED ||
+            this.worldWs.readyState === WebSocket.CLOSING
+          ) {
+            clearInterval(readyStatePoller);
+            console.error("❌ WebSocket closed before opening");
+          }
+        }, 100); // Check every 100ms
+
+        // Attach ALL event handlers immediately, before any async operations
+        this.worldWs.onopen = () => {
+          clearInterval(readyStatePoller);
+          // Authenticate
+          try {
+            this._sendToWorld({
+              t: "auth",
+              token: this.token,
+            });
+
+            // Immediately send join after auth
+            // (server will queue it until auth completes)
+            this._sendToWorld({
+              t: "join",
+              name: "Player",
+              coatColor: this.coatColor,
+            });
+          } catch (error) {
+            console.error("Connection error:", error);
+            clearTimeout(connectionTimeout);
+            reject(error);
+          }
+        };
+
+        this.worldWs.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            this._handleWorldMessage(msg);
+
+            if (msg.t === "welcome") {
+              clearTimeout(connectionTimeout);
+              this.authenticated = true;
+              this.joined = true;
+              this.connected = true; // Mark as fully connected
+              this.playerId = msg.playerId;
+              if (this.onConnected) {
+                this.onConnected(this.playerId);
+              }
+              resolve();
+            }
+          } catch (error) {
+            console.error("❌ Error processing message:", error, event.data);
+          }
+        };
+
+        this.worldWs.onerror = (error) => {
+          console.error("WebSocket error:", error);
           clearTimeout(connectionTimeout);
           reject(error);
-        }
-      };
+        };
 
-      this.worldWs.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          this._handleWorldMessage(msg);
-
-          if (msg.t === "welcome") {
-            clearTimeout(connectionTimeout);
-            this.authenticated = true;
-            this.joined = true;
-            this.connected = true; // Mark as fully connected
-            this.playerId = msg.playerId;
-            if (this.onConnected) {
-              this.onConnected(this.playerId);
-            }
-            resolve();
-          }
-        } catch (error) {
-          console.error("Error processing message:", error);
-        }
-      };
-
-      this.worldWs.onerror = (error) => {
-        console.error("Connection error:", error);
+        this.worldWs.onclose = (event) => {
+          clearTimeout(connectionTimeout);
+          this.authenticated = false;
+          this.joined = false;
+        };
+      } catch (error) {
         clearTimeout(connectionTimeout);
         reject(error);
-      };
-
-      this.worldWs.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        this.authenticated = false;
-        this.joined = false;
-      };
+      }
     });
   }
 
