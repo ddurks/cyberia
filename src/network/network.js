@@ -39,12 +39,13 @@ export class NetworkClient {
       log(`Connecting to matchmaker: ${matchmakerUrl}`);
 
       try {
-        // Specify both a subprotocol and a token for handshake
-        const subprotocol = "drawvid-auth";
-        const token = this.token || "";
+        // Specify subprotocol and token only if token is non-empty
+        const subprotocol = 'drawvid-auth';
+        const token = this.token;
+        const protocols = token ? [subprotocol, token] : [subprotocol];
         log(`[DEBUG] Creating WebSocket with URL: ${matchmakerUrl}`);
-        log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
-        this.matchmakerWs = new WebSocket(matchmakerUrl, [subprotocol, token]);
+        log(`[DEBUG] Sending subprotocols: ${JSON.stringify(protocols)}`);
+        this.matchmakerWs = new WebSocket(matchmakerUrl, protocols);
       } catch (e) {
         log(`Error creating WebSocket: ${e}`);
         reject(e);
@@ -372,12 +373,13 @@ export class NetworkClient {
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
       try {
-        // Specify both a subprotocol and a token for handshake
-        const subprotocol = "drawvid-auth";
-        const token = this.token || "";
+        // Specify subprotocol and token only if token is non-empty
+        const subprotocol = 'drawvid-auth';
+        const token = this.token;
+        const protocols = token ? [subprotocol, token] : [subprotocol];
         log(`[DEBUG] Creating WebSocket with URL: ${this.worldEndpoint.url}`);
-        log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
-        this.worldWs = new WebSocket(this.worldEndpoint.url, [
+        log(`[DEBUG] Sending subprotocols: ${JSON.stringify(protocols)}`);
+        this.worldWs = new WebSocket(this.worldEndpoint.url, protocols);
           subprotocol,
           token,
         ]);
