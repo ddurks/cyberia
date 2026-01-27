@@ -39,7 +39,8 @@ export class NetworkClient {
       log(`Connecting to matchmaker: ${matchmakerUrl}`);
 
       try {
-        this.matchmakerWs = new WebSocket(matchmakerUrl);
+        // Always specify subprotocol (empty array) for compatibility
+        this.matchmakerWs = new WebSocket(matchmakerUrl, []);
       } catch (e) {
         log(`Error creating WebSocket: ${e}`);
         reject(e);
@@ -342,7 +343,8 @@ export class NetworkClient {
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
       try {
-        this.worldWs = new WebSocket(this.worldEndpoint.url);
+        // Always specify subprotocol (empty array) for compatibility
+        this.worldWs = new WebSocket(this.worldEndpoint.url, []);
 
         // Set binary type explicitly for iOS
         this.worldWs.binaryType = "arraybuffer";
