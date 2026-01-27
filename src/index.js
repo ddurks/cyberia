@@ -355,9 +355,9 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
       // Apply random color to snowsuit material
       if (object.material && object.material.name === "snowsuit") {
         object.material.color.setRGB(
-          randomCoatColor.r,
-          randomCoatColor.g,
-          randomCoatColor.b,
+          randomCoatColor.r / 255,
+          randomCoatColor.g / 255,
+          randomCoatColor.b / 255,
         );
       }
     }
