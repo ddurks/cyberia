@@ -73,10 +73,11 @@ let lastServerUpdate = 0;
 let serverUpdateInterval = 0;
 
 // Generate random coat color early so it's available for network connection
+// Colors are 0-255 for network transmission, will be converted to 0-1 for Three.js
 const randomCoatColor = {
-  r: Math.random(),
-  g: Math.random(),
-  b: Math.random(),
+  r: Math.floor(Math.random() * 256),
+  g: Math.floor(Math.random() * 256),
+  b: Math.floor(Math.random() * 256),
 };
 
 // Initialize multiplayer

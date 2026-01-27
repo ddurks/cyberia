@@ -89,15 +89,16 @@ export class MultiplayerManager {
           object.castShadow = true;
           object.receiveShadow = true;
           // Apply player's coat color if available
+          // Colors are in 0-255 range, convert to 0-1 for Three.js
           if (
             object.material &&
             object.material.name === "snowsuit" &&
             playerData.coatColor
           ) {
             object.material.color.setRGB(
-              playerData.coatColor.r,
-              playerData.coatColor.g,
-              playerData.coatColor.b,
+              playerData.coatColor.r / 255,
+              playerData.coatColor.g / 255,
+              playerData.coatColor.b / 255,
             );
           }
         }
