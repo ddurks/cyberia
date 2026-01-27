@@ -40,8 +40,8 @@ export class NetworkClient {
 
       try {
         // Specify both a subprotocol and a token for handshake
-        const subprotocol = 'drawvid-auth';
-        const token = this.token || '';
+        const subprotocol = "drawvid-auth";
+        const token = this.token || "";
         log(`[DEBUG] Creating WebSocket with URL: ${matchmakerUrl}`);
         log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
         this.matchmakerWs = new WebSocket(matchmakerUrl, [subprotocol, token]);
@@ -63,12 +63,16 @@ export class NetworkClient {
 
       const onErrorHandler = (error) => {
         // Log as much detail as possible
-        log(`Matchmaker error: ${error && error.message ? error.message : JSON.stringify(error)}`);
+        log(
+          `Matchmaker error: ${error && error.message ? error.message : JSON.stringify(error)}`,
+        );
         if (error && error.error) {
           log(`Error detail: ${JSON.stringify(error.error)}`);
         }
-        if (typeof error === 'object') {
-          log(`Error object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+        if (typeof error === "object") {
+          log(
+            `Error object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`,
+          );
         }
         // Try to log the event if available
         if (window && window.event) {
@@ -93,7 +97,11 @@ export class NetworkClient {
   }
 
   // Create or join a world
-  async createAndJoinWorld(gameKey = "cyberia", worldId = null, coatColor = null) {
+  async createAndJoinWorld(
+    gameKey = "cyberia",
+    worldId = null,
+    coatColor = null,
+  ) {
     const startTime = Date.now();
     const log = (msg) =>
       console.log(
@@ -233,15 +241,17 @@ export class NetworkClient {
 
   _createWorld(gameKey) {
     return new Promise((resolve) => {
-      if (this.onStatus) this.onStatus("Submitting Request to Bureau of World Allocation...");
-      
+      if (this.onStatus)
+        this.onStatus("Submitting Request to Bureau of World Allocation...");
+
       const handler = (msg) => {
         if (msg.t === "worldCreated") {
           console.log(
             "[_createWorld] Received worldCreated response:",
             msg.worldId,
           );
-          if (this.onStatus) this.onStatus("World Resources Approved by State Committee!");
+          if (this.onStatus)
+            this.onStatus("World Resources Approved by State Committee!");
           this.matchmakerWs.removeEventListener("message", handler);
           resolve(msg.worldId);
         }
@@ -263,7 +273,8 @@ export class NetworkClient {
 
   _joinWorld(gameKey, worldId) {
     return new Promise((resolve, reject) => {
-      if (this.onStatus) this.onStatus("Awaiting Clearance from Ministry of Entry...");
+      if (this.onStatus)
+        this.onStatus("Awaiting Clearance from Ministry of Entry...");
       console.log("[_joinWorld] Waiting for joinResult for world:", worldId);
 
       const handler = (msg) => {
@@ -271,7 +282,8 @@ export class NetworkClient {
 
         if (msg.t === "joinResult") {
           console.log("[_joinWorld] Got joinResult, removing handler");
-          if (this.onStatus) this.onStatus("Entry Visa Granted! Preparing Transport...");
+          if (this.onStatus)
+            this.onStatus("Entry Visa Granted! Preparing Transport...");
           this.matchmakerWs.removeEventListener("message", handler);
           // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
           this.worldEndpoint = {
@@ -310,7 +322,8 @@ export class NetworkClient {
         `[WorldServer ${((Date.now() - startTime) / 1000).toFixed(2)}s] ${msg}`,
       );
 
-    if (this.onStatus) this.onStatus("Comrade Server is Warming Up Production Facilities...");
+    if (this.onStatus)
+      this.onStatus("Comrade Server is Warming Up Production Facilities...");
     log(`Starting connection to ${this.worldEndpoint.url}`);
     return await this._attemptWorldServerConnection(isIOS, log, startTime);
   }
@@ -318,7 +331,8 @@ export class NetworkClient {
   async _attemptWorldServerConnection(isIOS, log, startTime) {
     return new Promise((resolve, reject) => {
       if (log) log(`Connecting...`);
-      if (this.onStatus) this.onStatus("Your Patience Serves The Collective, Comrade...");
+      if (this.onStatus)
+        this.onStatus("Your Patience Serves The Collective, Comrade...");
 
       // Progressive status messages during long ECS startup
       const sovietMessages = [
@@ -328,7 +342,7 @@ export class NetworkClient {
         "Workers Are Stoking The Digital Boilers...",
         "Central Processing Committee is Convening...",
         "Infrastructure Commissar is Reviewing Protocols...",
-        "Nearly Ready, Glory to Digital Proletariat!"
+        "Nearly Ready, Glory to Digital Proletariat!",
       ];
       let messageIndex = 0;
       const messageInterval = setInterval(() => {
@@ -359,11 +373,14 @@ export class NetworkClient {
       // to avoid race condition on fast connections / slow mobile devices
       try {
         // Specify both a subprotocol and a token for handshake
-        const subprotocol = 'drawvid-auth';
-        const token = this.token || '';
+        const subprotocol = "drawvid-auth";
+        const token = this.token || "";
         log(`[DEBUG] Creating WebSocket with URL: ${this.worldEndpoint.url}`);
         log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
-        this.worldWs = new WebSocket(this.worldEndpoint.url, [subprotocol, token]);
+        this.worldWs = new WebSocket(this.worldEndpoint.url, [
+          subprotocol,
+          token,
+        ]);
 
         // Set binary type explicitly for iOS
         this.worldWs.binaryType = "arraybuffer";
@@ -462,8 +479,11 @@ export class NetworkClient {
           if (error && error.error) {
             console.error("Error detail:", JSON.stringify(error.error));
           }
-          if (typeof error === 'object') {
-            console.error("Error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+          if (typeof error === "object") {
+            console.error(
+              "Error object:",
+              JSON.stringify(error, Object.getOwnPropertyNames(error)),
+            );
           }
           if (window && window.event) {
             console.error("Window event:", JSON.stringify(window.event));
