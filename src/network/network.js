@@ -39,9 +39,12 @@ export class NetworkClient {
       log(`Connecting to matchmaker: ${matchmakerUrl}`);
 
       try {
-        // Specify a subprotocol for compatibility/auth (e.g., 'drawvid-auth')
+        // Specify both a subprotocol and a token for handshake
         const subprotocol = 'drawvid-auth';
-        this.matchmakerWs = new WebSocket(matchmakerUrl, subprotocol);
+        const token = this.token || '';
+        log(`[DEBUG] Creating WebSocket with URL: ${matchmakerUrl}`);
+        log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
+        this.matchmakerWs = new WebSocket(matchmakerUrl, [subprotocol, token]);
       } catch (e) {
         log(`Error creating WebSocket: ${e}`);
         reject(e);
@@ -355,9 +358,12 @@ export class NetworkClient {
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
       try {
-        // Specify a subprotocol for compatibility/auth (e.g., 'drawvid-auth')
+        // Specify both a subprotocol and a token for handshake
         const subprotocol = 'drawvid-auth';
-        this.worldWs = new WebSocket(this.worldEndpoint.url, subprotocol);
+        const token = this.token || '';
+        log(`[DEBUG] Creating WebSocket with URL: ${this.worldEndpoint.url}`);
+        log(`[DEBUG] Sending subprotocols: [${subprotocol}, ${token}]`);
+        this.worldWs = new WebSocket(this.worldEndpoint.url, [subprotocol, token]);
 
         // Set binary type explicitly for iOS
         this.worldWs.binaryType = "arraybuffer";
