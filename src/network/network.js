@@ -39,8 +39,9 @@ export class NetworkClient {
       log(`Connecting to matchmaker: ${matchmakerUrl}`);
 
       try {
-        // Always specify subprotocol (empty array) for compatibility
-        this.matchmakerWs = new WebSocket(matchmakerUrl, []);
+        // Specify a subprotocol for compatibility/auth (e.g., 'drawvid-auth')
+        const subprotocol = 'drawvid-auth';
+        this.matchmakerWs = new WebSocket(matchmakerUrl, subprotocol);
       } catch (e) {
         log(`Error creating WebSocket: ${e}`);
         reject(e);
@@ -58,10 +59,21 @@ export class NetworkClient {
       };
 
       const onErrorHandler = (error) => {
-        log(`Matchmaker error: ${error.message}`);
+        // Log as much detail as possible
+        log(`Matchmaker error: ${error && error.message ? error.message : JSON.stringify(error)}`);
+        if (error && error.error) {
+          log(`Error detail: ${JSON.stringify(error.error)}`);
+        }
+        if (typeof error === 'object') {
+          log(`Error object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+        }
+        // Try to log the event if available
+        if (window && window.event) {
+          log(`Window event: ${JSON.stringify(window.event)}`);
+        }
         reject(
           new Error(
-            `WebSocket connection failed: ${error.message || "Unknown error"}`,
+            `WebSocket connection failed: ${error && error.message ? error.message : JSON.stringify(error)}`,
           ),
         );
       };
@@ -343,8 +355,9 @@ export class NetworkClient {
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
       try {
-        // Always specify subprotocol (empty array) for compatibility
-        this.worldWs = new WebSocket(this.worldEndpoint.url, []);
+        // Specify a subprotocol for compatibility/auth (e.g., 'drawvid-auth')
+        const subprotocol = 'drawvid-auth';
+        this.worldWs = new WebSocket(this.worldEndpoint.url, subprotocol);
 
         // Set binary type explicitly for iOS
         this.worldWs.binaryType = "arraybuffer";
@@ -438,7 +451,17 @@ export class NetworkClient {
         };
 
         this.worldWs.onerror = (error) => {
+          // Log as much detail as possible
           console.error("WebSocket error:", error);
+          if (error && error.error) {
+            console.error("Error detail:", JSON.stringify(error.error));
+          }
+          if (typeof error === 'object') {
+            console.error("Error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+          }
+          if (window && window.event) {
+            console.error("Window event:", JSON.stringify(window.event));
+          }
           clearTimeout(connectionTimeout);
           reject(error);
         };
