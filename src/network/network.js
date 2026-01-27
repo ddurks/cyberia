@@ -304,9 +304,32 @@ export class NetworkClient {
       if (log) log(`Connecting...`);
       if (this.onStatus) this.onStatus("Your Patience Serves The Collective, Comrade...");
 
+      // Progressive status messages during long ECS startup
+      const sovietMessages = [
+        "Allocating Server Resources from State Reserves...",
+        "Awakening Dormant Production Facilities...",
+        "Five-Year Plan Requires Patience, Comrade...",
+        "Workers Are Stoking The Digital Boilers...",
+        "Central Processing Committee is Convening...",
+        "Infrastructure Commissar is Reviewing Protocols...",
+        "Nearly Ready, Glory to Digital Proletariat!"
+      ];
+      let messageIndex = 0;
+      const messageInterval = setInterval(() => {
+        if (this.authenticated || messageIndex >= sovietMessages.length) {
+          clearInterval(messageInterval);
+          return;
+        }
+        if (this.onStatus) {
+          this.onStatus(sovietMessages[messageIndex]);
+        }
+        messageIndex++;
+      }, 4000); // Update message every 4 seconds
+
       // Connection timeout - World server can take 15-20 seconds to start in ECS
       // Adding 60 second timeout for task startup
       const connectionTimeout = setTimeout(() => {
+        clearInterval(messageInterval);
         if (!this.authenticated) {
           if (this.worldWs) {
             this.worldWs.close();
