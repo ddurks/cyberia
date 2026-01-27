@@ -181,7 +181,9 @@ if (MULTIPLAYER_ENABLED) {
         })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.setStatus("State Infrastructure Unavailable. Proceeding Offline.");
+          loadingScreen.setStatus(
+            "State Infrastructure Unavailable. Proceeding Offline.",
+          );
           networkAttemptComplete = true;
           checkAllLoadingComplete();
         });
@@ -191,8 +193,14 @@ if (MULTIPLAYER_ENABLED) {
       networkClient
         .connectToMatchmaker(config.matchmakerUrl)
         .then(() => {
-          loadingScreen.setStatus("Requesting World Allocation from State Planning Committee...");
-          return networkClient.createAndJoinWorld("cyberia", null, randomCoatColor);
+          loadingScreen.setStatus(
+            "Requesting World Allocation from State Planning Committee...",
+          );
+          return networkClient.createAndJoinWorld(
+            "cyberia",
+            null,
+            randomCoatColor,
+          );
         })
         .then(() => {
           networkAttemptComplete = true;
@@ -200,7 +208,9 @@ if (MULTIPLAYER_ENABLED) {
         })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.setStatus("Ministry of Digital Infrastructure Reports Delays. Proceeding Offline.");
+          loadingScreen.setStatus(
+            "Ministry of Digital Infrastructure Reports Delays. Proceeding Offline.",
+          );
           networkAttemptComplete = true;
           checkAllLoadingComplete();
         });
@@ -781,8 +791,29 @@ function checkAndStartGame() {
 }
 
 function onWindowResize() {
-  const width = canvasContainer.clientWidth;
-  const height = canvasContainer.clientHeight;
+  let width, height;
+  if (IS_MOBILE) {
+    width = window.innerWidth;
+    // Find the top of the HUD controller image
+    const hudBase = document.getElementById("hud-base");
+    let hudTop = window.innerHeight;
+    if (hudBase) {
+      const rect = hudBase.getBoundingClientRect();
+      // rect.top is relative to viewport top
+      hudTop = rect.top;
+    }
+    height = Math.max(1, Math.floor(hudTop));
+    // Set container and canvas height to this value
+    if (canvasContainer) {
+      canvasContainer.style.height = height + "px";
+    }
+    if (canvas) {
+      canvas.style.height = height + "px";
+    }
+  } else {
+    width = canvasContainer.clientWidth;
+    height = canvasContainer.clientHeight;
+  }
 
   // Ensure we have valid dimensions
   if (width <= 0 || height <= 0) {
@@ -790,31 +821,48 @@ function onWindowResize() {
     return;
   }
 
-  console.log("[Resize] Resizing to:", width, "x", height);
+  // Set canvas pixel size attributes to match display size
+  if (canvas) {
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+  }
 
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-
   renderer.setSize(width, height, false);
 }
 
 // Handle window resize
 window.addEventListener("resize", onWindowResize);
 
-// On mobile, also listen for orientation change
+// --- Robust mobile resize/orientation handling ---
+function robustMobileResize() {
+  let lastW = window.innerWidth,
+    lastH = window.innerHeight;
+  let count = 0;
+  function pollResize() {
+    const w = window.innerWidth,
+      h = window.innerHeight;
+    if (w !== lastW || h !== lastH) {
+      lastW = w;
+      lastH = h;
+      onWindowResize();
+    }
+    if (++count < 10) setTimeout(pollResize, 100); // poll for 1s
+  }
+  setTimeout(() => {
+    onWindowResize();
+    pollResize();
+  }, 300); // initial delay to let UI settle
+}
+
 if (IS_MOBILE) {
   window.addEventListener("orientationchange", () => {
     console.log("[Mobile] Orientation changed");
-    // Wait a bit for the layout to settle
-    setTimeout(onWindowResize, 100);
+    robustMobileResize();
   });
-
-  // Also handle Safari viewport changes during scrolling
-  document.addEventListener(
-    "touchmove",
-    () => {
-      // Don't resize during touch - too frequent
-    },
-    { passive: true },
-  );
+  // Also run after load
+  window.addEventListener("load", robustMobileResize);
 }
