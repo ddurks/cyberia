@@ -176,7 +176,7 @@ if (MULTIPLAYER_ENABLED) {
       // Production: connect through matchmaker
       networkClient
         .connectToMatchmaker(config.matchmakerUrl)
-        .then(() => networkClient.createAndJoinWorld("cyberia"))
+        .then(() => networkClient.createAndJoinWorld("cyberia", null, randomCoatColor))
         .then(() => loadingScreen.complete())
         .catch((err) => {
           console.error("❌ Network error:", err);

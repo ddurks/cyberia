@@ -76,7 +76,7 @@ export class NetworkClient {
   }
 
   // Create or join a world
-  async createAndJoinWorld(gameKey = "cyberia", worldId = null) {
+  async createAndJoinWorld(gameKey = "cyberia", worldId = null, coatColor = null) {
     const startTime = Date.now();
     const log = (msg) =>
       console.log(
@@ -88,6 +88,9 @@ export class NetworkClient {
     if (!this.matchmakerWs || this.matchmakerWs.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to matchmaker");
     }
+
+    // Store coat color for later use when connecting to world server
+    this.coatColor = coatColor;
 
     // Create world if no worldId provided
     if (!worldId) {
