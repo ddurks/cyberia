@@ -7,6 +7,7 @@ import { NetworkClient } from "./network/network.js";
 import { MultiplayerManager } from "./network/multiplayer.js";
 import { WorldGenerator } from "./world/worldgen.js";
 import { getNetworkConfig } from "./core/config.js";
+import { LoadingScreen } from "./ui/loadingScreen.js";
 import {
   CharacterControls,
   footBoneNames,
@@ -150,6 +151,12 @@ if (MULTIPLAYER_ENABLED) {
   // Store connection config - we'll connect AFTER scene is ready
   window._pendingNetworkConnection = async () => {
     const config = getNetworkConfig();
+    // Create global loading screen instance if not already created
+    if (!loadingScreen) {
+      loadingScreen = new LoadingScreen();
+      loadingScreen.show();
+    }
+
     if (config.mode === "direct") {
       // Local development: direct connection to world server
       const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
@@ -159,13 +166,21 @@ if (MULTIPLAYER_ENABLED) {
           LOCAL_DEV_TOKEN,
           randomCoatColor,
         )
-        .catch((err) => console.error("❌ Network error:", err));
+        .then(() => loadingScreen.complete())
+        .catch((err) => {
+          console.error("❌ Network error:", err);
+          loadingScreen.hide();
+        });
     } else if (config.mode === "matchmaker") {
       // Production: connect through matchmaker
       networkClient
         .connectToMatchmaker(config.matchmakerUrl)
         .then(() => networkClient.createAndJoinWorld("cyberia"))
-        .catch((err) => console.error("❌ Network error:", err));
+        .then(() => loadingScreen.complete())
+        .catch((err) => {
+          console.error("❌ Network error:", err);
+          loadingScreen.hide();
+        });
     }
   };
 
@@ -189,11 +204,21 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: "high-performance",
 });
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setSize(
-  canvasContainer.clientWidth,
-  canvasContainer.clientHeight,
-  false,
-);
+
+// Get initial dimensions - critical for mobile
+const getContainerSize = () => {
+  const width = Math.max(canvasContainer.clientWidth || window.innerWidth, 1);
+  const height = Math.max(
+    canvasContainer.clientHeight || window.innerHeight,
+    1,
+  );
+  return { width, height };
+};
+
+const { width: initialWidth, height: initialHeight } = getContainerSize();
+console.log("[Init] Canvas size:", initialWidth, "x", initialHeight);
+
+renderer.setSize(initialWidth, initialHeight, false);
 renderer.setPixelRatio(IS_MOBILE ? 1 : window.devicePixelRatio);
 renderer.shadowMap.enabled = !IS_MOBILE;
 
@@ -215,11 +240,15 @@ document.getElementById("hud-container").appendChild(networkStats);
 
 const camera = new THREE.PerspectiveCamera(
   50,
-  canvas.clientWidth / canvas.clientHeight,
+  initialWidth / initialHeight,
   0.1,
   100,
 );
 camera.position.set(0, 2, 5);
+
+// Ensure aspect ratio is correct on initial load
+camera.aspect = initialWidth / initialHeight;
+camera.updateProjectionMatrix();
 
 const solver = new CANNON.GSSolver();
 solver.iterations = 5;
@@ -477,9 +506,11 @@ function animate() {
 
         // Don't reconcile if player is actively moving - trust client prediction
         // Only reconcile when idle or when error is huge (>2 units = major desync)
-        const isActivelyMoving = Math.sqrt(
-          body.velocity.x * body.velocity.x + body.velocity.z * body.velocity.z
-        ) > 1.0;
+        const isActivelyMoving =
+          Math.sqrt(
+            body.velocity.x * body.velocity.x +
+              body.velocity.z * body.velocity.z,
+          ) > 1.0;
         const isMajorDesync = xzError > 2.0;
 
         if (!isActivelyMoving || isMajorDesync) {
@@ -674,7 +705,8 @@ function updatePlayerFootsteps() {
 
 let assetsLoaded = false;
 let loadStartTime = Date.now();
-let networkConnectionInitiated = false; // Prevent multiple connection attempts
+let networkConnectionInitiated = false;
+let loadingScreen = null; // Will hold the LoadingScreen instance
 
 THREE.DefaultLoadingManager.onLoad = () => {
   assetsLoaded = true;
@@ -696,7 +728,7 @@ function checkAndStartGame() {
   const loadingBG = document.getElementById("loading-bg");
 
   if (!loading || !loadingBG) {
-    requestAnimationFrame(animate);
+    animate();
     return;
   }
 
@@ -709,22 +741,22 @@ function checkAndStartGame() {
     return;
   }
 
-  // Now show the completion gif for 2 seconds
-  loading.src = "assets/cyberia_loading_complete.gif";
-  setTimeout(() => {
-    if (loading.parentNode) {
-      loading.outerHTML = "";
-    }
-    if (loadingBG.parentNode) {
-      loadingBG.outerHTML = "";
-    }
-    requestAnimationFrame(animate);
-  }, 1600);
+  // Start animation, but DON'T hide loading screen yet
+  // The network connection will hide it when ready via loadingScreen.complete()
+  animate();
 }
 
 function onWindowResize() {
   const width = canvasContainer.clientWidth;
   const height = canvasContainer.clientHeight;
+
+  // Ensure we have valid dimensions
+  if (width <= 0 || height <= 0) {
+    console.warn("[Resize] Invalid dimensions:", width, "x", height);
+    return;
+  }
+
+  console.log("[Resize] Resizing to:", width, "x", height);
 
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -732,4 +764,23 @@ function onWindowResize() {
   renderer.setSize(width, height, false);
 }
 
+// Handle window resize
 window.addEventListener("resize", onWindowResize);
+
+// On mobile, also listen for orientation change
+if (IS_MOBILE) {
+  window.addEventListener("orientationchange", () => {
+    console.log("[Mobile] Orientation changed");
+    // Wait a bit for the layout to settle
+    setTimeout(onWindowResize, 100);
+  });
+
+  // Also handle Safari viewport changes during scrolling
+  document.addEventListener(
+    "touchmove",
+    () => {
+      // Don't resize during touch - too frequent
+    },
+    { passive: true },
+  );
+}

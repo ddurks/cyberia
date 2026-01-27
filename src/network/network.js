@@ -28,48 +28,82 @@ export class NetworkClient {
 
   // Connect to matchmaker
   connectToMatchmaker(matchmakerUrl) {
+    const startTime = Date.now();
+    const log = (msg) =>
+      console.log(
+        `[Network ${((Date.now() - startTime) / 1000).toFixed(2)}s] ${msg}`,
+      );
+
     return new Promise((resolve, reject) => {
-      console.log(`🎮 Connecting to matchmaker: ${matchmakerUrl}`);
+      log(`Connecting to matchmaker: ${matchmakerUrl}`);
 
-      this.matchmakerWs = new WebSocket(matchmakerUrl);
+      try {
+        this.matchmakerWs = new WebSocket(matchmakerUrl);
+      } catch (e) {
+        log(`Error creating WebSocket: ${e}`);
+        reject(e);
+        return;
+      }
 
-      this.matchmakerWs.onopen = () => {
-        console.log("✓ Connected to matchmaker");
+      const onOpenHandler = () => {
+        log("✓ Connected to matchmaker");
         resolve();
       };
 
-      this.matchmakerWs.onmessage = (event) => {
+      const onMessageHandler = (event) => {
         const msg = JSON.parse(event.data);
         this._handleMatchmakerMessage(msg);
       };
 
-      this.matchmakerWs.onerror = (error) => {
-        console.error("Matchmaker error:", error);
-        reject(error);
+      const onErrorHandler = (error) => {
+        log(`Matchmaker error: ${error.message}`);
+        reject(
+          new Error(
+            `WebSocket connection failed: ${error.message || "Unknown error"}`,
+          ),
+        );
       };
 
-      this.matchmakerWs.onclose = () => {
-        console.log("Matchmaker connection closed");
+      const onCloseHandler = (event) => {
+        log(`Matchmaker connection closed: code=${event.code}`);
       };
+
+      this.matchmakerWs.addEventListener("open", onOpenHandler);
+      this.matchmakerWs.addEventListener("message", onMessageHandler);
+      this.matchmakerWs.addEventListener("error", onErrorHandler);
+      this.matchmakerWs.addEventListener("close", onCloseHandler);
     });
   }
 
   // Create or join a world
   async createAndJoinWorld(gameKey = "cyberia", worldId = null) {
+    const startTime = Date.now();
+    const log = (msg) =>
+      console.log(
+        `[Network ${((Date.now() - startTime) / 1000).toFixed(2)}s] ${msg}`,
+      );
+
+    log(`Starting with gameKey: ${gameKey}`);
+
     if (!this.matchmakerWs || this.matchmakerWs.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to matchmaker");
     }
 
     // Create world if no worldId provided
     if (!worldId) {
+      log("Creating new world...");
       worldId = await this._createWorld(gameKey);
+      log(`World created: ${worldId}`);
     }
 
     // Join the world
+    log(`Joining world: ${worldId}`);
     await this._joinWorld(gameKey, worldId);
+    log(`World joined, connecting to world server...`);
 
     // Connect to world server
     await this._connectToWorldServer();
+    log(`Connected to world server!`);
   }
 
   // Connect directly to world server (bypass matchmaker for local dev)
@@ -181,6 +215,10 @@ export class NetworkClient {
     return new Promise((resolve) => {
       const handler = (msg) => {
         if (msg.t === "worldCreated") {
+          console.log(
+            "[_createWorld] Received worldCreated response:",
+            msg.worldId,
+          );
           this.matchmakerWs.removeEventListener("message", handler);
           resolve(msg.worldId);
         }
@@ -189,54 +227,83 @@ export class NetworkClient {
         handler(JSON.parse(e.data)),
       );
 
+      console.log(
+        "[_createWorld] Sending createWorld with worldId: cyberia-public",
+      );
       this._sendToMatchmaker({
         t: "createWorld",
         gameKey,
+        worldId: "cyberia-public", // Fixed world ID - all players join the same world
       });
     });
   }
 
   _joinWorld(gameKey, worldId) {
     return new Promise((resolve, reject) => {
+      console.log("[_joinWorld] Waiting for joinResult for world:", worldId);
+
       const handler = (msg) => {
+        console.log("[_joinWorld] Received message:", msg.t);
+
         if (msg.t === "joinResult") {
+          console.log("[_joinWorld] Got joinResult, removing handler");
           this.matchmakerWs.removeEventListener("message", handler);
+          // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
           this.worldEndpoint = {
-            url: `ws://${msg.endpoint.ip}:${msg.endpoint.port}`,
+            url: `wss://${msg.endpoint.ip}`,
           };
           this.token = msg.token;
           console.log("✓ Received world endpoint:", this.worldEndpoint.url);
           resolve();
         } else if (msg.t === "err") {
+          console.log("[_joinWorld] Got error:", msg.msg);
           this.matchmakerWs.removeEventListener("message", handler);
           reject(new Error(msg.msg));
         }
       };
-      this.matchmakerWs.addEventListener("message", (e) =>
-        handler(JSON.parse(e.data)),
-      );
+      this.matchmakerWs.addEventListener("message", (e) => {
+        const parsed = JSON.parse(e.data);
+        console.log("[_joinWorld] Raw message event:", parsed.t);
+        handler(parsed);
+      });
 
+      console.log("[_joinWorld] Sending joinWorld request...");
       this._sendToMatchmaker({
         t: "joinWorld",
         gameKey,
         worldId,
       });
+      console.log("[_joinWorld] joinWorld request sent");
     });
   }
 
   async _connectToWorldServer() {
-    return new Promise((resolve, reject) => {
-      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const startTime = Date.now();
+    const log = (msg) =>
+      console.log(
+        `[WorldServer ${((Date.now() - startTime) / 1000).toFixed(2)}s] ${msg}`,
+      );
 
-      // Connection timeout - iOS can be slower
+    log(`Starting connection to ${this.worldEndpoint.url}`);
+    return await this._attemptWorldServerConnection(isIOS, log, startTime);
+  }
+
+  async _attemptWorldServerConnection(isIOS, log, startTime) {
+    return new Promise((resolve, reject) => {
+      if (log) log(`Connecting...`);
+
+      // Connection timeout - World server can take 15-20 seconds to start in ECS
+      // Adding 60 second timeout for task startup
       const connectionTimeout = setTimeout(() => {
         if (!this.authenticated) {
           if (this.worldWs) {
             this.worldWs.close();
           }
+          if (log) log(`Connection timeout after 60s`);
           reject(new Error("Connection timeout"));
         }
-      }, 15000); // Increased from 10s to 15s for iOS
+      }, 60000); // 60 seconds to account for ECS task startup
 
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
@@ -323,6 +390,7 @@ export class NetworkClient {
               this.joined = true;
               this.connected = true; // Mark as fully connected
               this.playerId = msg.playerId;
+              if (log) log(`✓ Welcome received, authenticated!`);
               if (this.onConnected) {
                 this.onConnected(this.playerId);
               }

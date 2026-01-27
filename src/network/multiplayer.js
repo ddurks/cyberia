@@ -89,11 +89,15 @@ export class MultiplayerManager {
           object.castShadow = true;
           object.receiveShadow = true;
           // Apply player's coat color if available
-          if (object.material && object.material.name === "snowsuit" && playerData.coatColor) {
+          if (
+            object.material &&
+            object.material.name === "snowsuit" &&
+            playerData.coatColor
+          ) {
             object.material.color.setRGB(
               playerData.coatColor.r,
               playerData.coatColor.g,
-              playerData.coatColor.b
+              playerData.coatColor.b,
             );
           }
         }
@@ -189,7 +193,7 @@ export class MultiplayerManager {
         player.velocity.x * player.velocity.x +
           player.velocity.z * player.velocity.z,
       );
-      
+
       // Check if there's distance to travel to target (will be moving this frame)
       const distanceToTarget = Math.sqrt(
         Math.pow(player.targetPosition.x - player.model.position.x, 2) +
@@ -205,7 +209,8 @@ export class MultiplayerManager {
         player.model.position.x +=
           (player.targetPosition.x - player.model.position.x) * lerpFactor;
         player.model.position.y +=
-          (player.targetPosition.y - 0.35 - player.model.position.y) * lerpFactor; // Subtract capsule radius
+          (player.targetPosition.y - 0.35 - player.model.position.y) *
+          lerpFactor; // Subtract capsule radius
         player.model.position.z +=
           (player.targetPosition.z - player.model.position.z) * lerpFactor;
       }
@@ -245,7 +250,7 @@ export class MultiplayerManager {
       // Update animation based on whether player has distance to cover
       if (player.mixer && player.animationsMap) {
         const isGrounded = player.grounded;
-        
+
         // Animate as running if there's significant distance to target position
         // (the lerp will move them toward it)
         const isMoving = distanceToTarget > 0.05 && isGrounded;
