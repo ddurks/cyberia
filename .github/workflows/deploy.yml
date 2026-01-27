@@ -36,17 +36,31 @@ jobs:
         id: aws
         run: echo "account-id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
-      - name: Deploy to S3
+      - name: Deploy to S3 with smart caching
         run: |
           BUCKET_NAME="cyberia-drawvid-frontend-${{ steps.aws.outputs.account-id }}"
-          aws s3 sync dist/ "s3://$BUCKET_NAME/" --delete --cache-control "public, max-age=3600"
+          
+          # Assets get 1h cache (versioned files)
+          echo "Deploying assets with 1h cache..."
+          aws s3 sync dist/assets "s3://$BUCKET_NAME/assets" \
+            --cache-control "public, max-age=3600" \
+            --delete \
+            --region us-east-2
+          
+          # index.html gets no cache (entry point)
+          echo "Deploying index.html with no cache..."
+          aws s3 cp dist/index.html "s3://$BUCKET_NAME/index.html" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --region us-east-2
+          
           echo "✅ Deployed to S3: $BUCKET_NAME"
 
-      - name: Invalidate CloudFront
+      - name: Invalidate CloudFront cache
         run: |
           DIST_ID="E2CCOO5NN3Z8QV"
           INVALIDATION_ID=$(aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*" --query 'Invalidation.Id' --output text)
           echo "✅ CloudFront invalidation created: $INVALIDATION_ID"
+          echo "Cache will be refreshed in 1-2 minutes"
 
       - name: Deployment summary
         run: |
