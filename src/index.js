@@ -87,6 +87,13 @@ if (MULTIPLAYER_ENABLED) {
   networkClient = new NetworkClient();
   worldGenerator = new WorldGenerator(Date.now());
 
+  // Status callback for loading screen
+  networkClient.onStatus = (message) => {
+    if (loadingScreen) {
+      loadingScreen.setStatus(message);
+    }
+  };
+
   networkClient.onConnected = (playerId) => {
     multiplayerManager.setLocalPlayerId(playerId);
     _playerJustConnected = true;
@@ -160,6 +167,7 @@ if (MULTIPLAYER_ENABLED) {
 
     if (config.mode === "direct") {
       // Local development: direct connection to world server
+      loadingScreen.setStatus("Contacting Local Commissariat...");
       const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
       networkClient
         .connectDirectly(
@@ -167,20 +175,34 @@ if (MULTIPLAYER_ENABLED) {
           LOCAL_DEV_TOKEN,
           randomCoatColor,
         )
-        .then(() => loadingScreen.complete())
+        .then(() => {
+          networkAttemptComplete = true;
+          checkAllLoadingComplete();
+        })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.hide();
+          loadingScreen.setStatus("State Infrastructure Unavailable. Proceeding Offline.");
+          networkAttemptComplete = true;
+          checkAllLoadingComplete();
         });
     } else if (config.mode === "matchmaker") {
       // Production: connect through matchmaker
+      loadingScreen.setStatus("Establishing Link to Central Authority...");
       networkClient
         .connectToMatchmaker(config.matchmakerUrl)
-        .then(() => networkClient.createAndJoinWorld("cyberia", null, randomCoatColor))
-        .then(() => loadingScreen.complete())
+        .then(() => {
+          loadingScreen.setStatus("Requesting World Allocation from State Planning Committee...");
+          return networkClient.createAndJoinWorld("cyberia", null, randomCoatColor);
+        })
+        .then(() => {
+          networkAttemptComplete = true;
+          checkAllLoadingComplete();
+        })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.hide();
+          loadingScreen.setStatus("Ministry of Digital Infrastructure Reports Delays. Proceeding Offline.");
+          networkAttemptComplete = true;
+          checkAllLoadingComplete();
         });
     }
   };
@@ -708,6 +730,15 @@ let assetsLoaded = false;
 let loadStartTime = Date.now();
 let networkConnectionInitiated = false;
 let loadingScreen = null; // Will hold the LoadingScreen instance
+let networkAttemptComplete = false;
+let sceneReady = false;
+
+function checkAllLoadingComplete() {
+  // Only hide loading screen when BOTH scene is ready AND network attempt is complete (success or failure)
+  if (sceneReady && networkAttemptComplete && loadingScreen) {
+    loadingScreen.complete();
+  }
+}
 
 THREE.DefaultLoadingManager.onLoad = () => {
   assetsLoaded = true;
@@ -745,6 +776,8 @@ function checkAndStartGame() {
   // Start animation, but DON'T hide loading screen yet
   // The network connection will hide it when ready via loadingScreen.complete()
   animate();
+  sceneReady = true;
+  checkAllLoadingComplete();
 }
 
 function onWindowResize() {

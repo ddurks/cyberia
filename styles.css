@@ -11,6 +11,17 @@ html, body {
   left: 0;
 }
 
+#cyberia-logo {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 250px !important;
+  height: auto;
+  z-index: 10001;
+  pointer-events: none;
+  opacity: 0.9;  transition: opacity 0.3s ease;}
+
 #online-status {
   position: absolute;
   top: 18px;
@@ -48,6 +59,18 @@ html, body {
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.8),
                0 0 20px rgba(255, 255, 255, 0.6),
                0 0 30px rgba(255, 255, 255, 0.4);
+}
+
+#vibe-gif {
+  position: absolute;
+  width: 75px;
+  height: 75px;
+  top: 45px;
+  right: 18px;
+  z-index: 102;
+  pointer-events: none;
+  opacity: 0.85;
+  object-fit: cover;
 }
 
 #network-stats {
@@ -204,7 +227,7 @@ body.mobile #hud-container {
   transition: opacity 0.5s ease;
 }
 
-#loading-bg img {
+#loading-bg > img:not(#cyberia-logo) {
   width: 100vmax;
   height: 100vmax;
   object-fit: contain;

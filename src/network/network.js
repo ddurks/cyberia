@@ -19,6 +19,7 @@ export class NetworkClient {
     this.onBootstrapData = null;
     this.onVoicePeers = null;
     this.onError = null;
+    this.onStatus = null; // Status updates for loading screen
 
     this.inputSeq = 0;
     this.lastSentInput = null;
@@ -216,12 +217,15 @@ export class NetworkClient {
 
   _createWorld(gameKey) {
     return new Promise((resolve) => {
+      if (this.onStatus) this.onStatus("Submitting Request to Bureau of World Allocation...");
+      
       const handler = (msg) => {
         if (msg.t === "worldCreated") {
           console.log(
             "[_createWorld] Received worldCreated response:",
             msg.worldId,
           );
+          if (this.onStatus) this.onStatus("World Resources Approved by State Committee!");
           this.matchmakerWs.removeEventListener("message", handler);
           resolve(msg.worldId);
         }
@@ -243,6 +247,7 @@ export class NetworkClient {
 
   _joinWorld(gameKey, worldId) {
     return new Promise((resolve, reject) => {
+      if (this.onStatus) this.onStatus("Awaiting Clearance from Ministry of Entry...");
       console.log("[_joinWorld] Waiting for joinResult for world:", worldId);
 
       const handler = (msg) => {
@@ -250,6 +255,7 @@ export class NetworkClient {
 
         if (msg.t === "joinResult") {
           console.log("[_joinWorld] Got joinResult, removing handler");
+          if (this.onStatus) this.onStatus("Entry Visa Granted! Preparing Transport...");
           this.matchmakerWs.removeEventListener("message", handler);
           // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
           this.worldEndpoint = {
@@ -288,6 +294,7 @@ export class NetworkClient {
         `[WorldServer ${((Date.now() - startTime) / 1000).toFixed(2)}s] ${msg}`,
       );
 
+    if (this.onStatus) this.onStatus("Comrade Server is Warming Up Production Facilities...");
     log(`Starting connection to ${this.worldEndpoint.url}`);
     return await this._attemptWorldServerConnection(isIOS, log, startTime);
   }
@@ -295,6 +302,7 @@ export class NetworkClient {
   async _attemptWorldServerConnection(isIOS, log, startTime) {
     return new Promise((resolve, reject) => {
       if (log) log(`Connecting...`);
+      if (this.onStatus) this.onStatus("Your Patience Serves The Collective, Comrade...");
 
       // Connection timeout - World server can take 15-20 seconds to start in ECS
       // Adding 60 second timeout for task startup
