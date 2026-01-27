@@ -380,9 +380,6 @@ export class NetworkClient {
         log(`[DEBUG] Creating WebSocket with URL: ${this.worldEndpoint.url}`);
         log(`[DEBUG] Sending subprotocols: ${JSON.stringify(protocols)}`);
         this.worldWs = new WebSocket(this.worldEndpoint.url, protocols);
-          subprotocol,
-          token,
-        ]);
 
         // Set binary type explicitly for iOS
         this.worldWs.binaryType = "arraybuffer";
