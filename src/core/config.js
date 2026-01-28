@@ -32,8 +32,8 @@ export const NetworkConfig = {
 
   // Production (AWS deployment with matchmaker)
   PRODUCTION: {
-    // Use API Gateway URL directly - custom domain DNS still propagating
-    matchmakerUrl: "wss://ce5shqmanb.execute-api.us-east-2.amazonaws.com/prod",
+    // API Gateway WebSocket endpoint
+    matchmakerUrl: "wss://cmtako4tm6.execute-api.us-east-2.amazonaws.com/prod",
     mode: "matchmaker",
   },
 };

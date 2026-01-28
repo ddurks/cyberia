@@ -171,7 +171,7 @@ export class NetworkClient {
     });
   }
 
-  // Upload world bootstrap (terrain + trees)
+  // Upload world bootstrap (terrain + trees) - split into smaller messages
   uploadBootstrap(payload) {
     console.log(
       `📤 uploadBootstrap called: worldWs=${!!this.worldWs} joined=${this.joined} hasHeightmap=${!!payload?.heightmap}`,
@@ -184,31 +184,59 @@ export class NetworkClient {
 
     // If not joined yet, queue the upload
     if (!this.joined) {
-      // Queueing bootstrap upload until joined
       const checkJoined = setInterval(() => {
         if (this.joined) {
           clearInterval(checkJoined);
-          // Now joined, sending queued bootstrap
-          this._sendToWorld({
-            t: "bootstrapUpload",
-            worldId: "local",
-            version: 1,
-            payload,
-          });
-          // Bootstrap sent
+          this._uploadBootstrapChunked(payload);
         }
-      }, 50); // Check every 50ms
+      }, 50);
       return;
     }
 
-    // Sending bootstrap to server
-    this._sendToWorld({
-      t: "bootstrapUpload",
-      worldId: "local", // Will be overridden by server
-      version: 1,
-      payload,
-    });
-    // Bootstrap sent
+    this._uploadBootstrapChunked(payload);
+  }
+
+  _uploadBootstrapChunked(payload) {
+    // Send terrain config
+    if (payload.terrainConfig) {
+      this._sendToWorld({
+        t: "bootstrapUpload",
+        worldId: "local",
+        version: 1,
+        part: "terrain",
+        payload: {
+          terrainConfig: payload.terrainConfig,
+          seed: payload.seed,
+        },
+      });
+    }
+
+    // Send tree instances in small chunks (50 trees per message, stays under 32KB)
+    const chunkSize = 50;
+    const treeInstances = payload.instances[0]?.positions || [];
+    
+    for (let i = 0; i < treeInstances.length; i += chunkSize) {
+      const chunk = treeInstances.slice(i, i + chunkSize);
+      
+      this._sendToWorld({
+        t: "bootstrapUpload",
+        worldId: "local",
+        version: 1,
+        part: "instances",
+        positions: chunk,
+      });
+    }
+
+    // Send colliders
+    if (payload.colliders) {
+      this._sendToWorld({
+        t: "bootstrapUpload",
+        worldId: "local",
+        version: 1,
+        part: "colliders",
+        payload: payload.colliders,
+      });
+    }
   }
 
   // Send WebRTC signaling
@@ -569,7 +597,12 @@ export class NetworkClient {
 
   _sendToWorld(msg) {
     if (this.worldWs && this.worldWs.readyState === WebSocket.OPEN) {
-      this.worldWs.send(JSON.stringify(msg));
+      const json = JSON.stringify(msg);
+      // Log message size for large messages
+      if (json.length > 50000) {
+        console.warn(`[Network] Large message being sent: ${(json.length / 1024).toFixed(2)}KB (type: ${msg.t})`);
+      }
+      this.worldWs.send(json);
     }
   }
 }
