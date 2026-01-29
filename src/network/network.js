@@ -171,10 +171,10 @@ export class NetworkClient {
     });
   }
 
-  // Upload world bootstrap (terrain + trees) - split into smaller messages
+  // Upload world bootstrap (terrain + trees)
   uploadBootstrap(payload) {
     console.log(
-      `📤 uploadBootstrap called: worldWs=${!!this.worldWs} joined=${this.joined} hasHeightmap=${!!payload?.heightmap}`,
+      `📤 uploadBootstrap called: worldWs=${!!this.worldWs} joined=${this.joined}`,
     );
 
     if (!this.worldWs) {
@@ -187,56 +187,19 @@ export class NetworkClient {
       const checkJoined = setInterval(() => {
         if (this.joined) {
           clearInterval(checkJoined);
-          this._uploadBootstrapChunked(payload);
+          this._sendToWorld({
+            t: "bootstrapUpload",
+            payload,
+          });
         }
       }, 50);
       return;
     }
 
-    this._uploadBootstrapChunked(payload);
-  }
-
-  _uploadBootstrapChunked(payload) {
-    // Send terrain config
-    if (payload.terrainConfig) {
-      this._sendToWorld({
-        t: "bootstrapUpload",
-        worldId: "local",
-        version: 1,
-        part: "terrain",
-        payload: {
-          terrainConfig: payload.terrainConfig,
-          seed: payload.seed,
-        },
-      });
-    }
-
-    // Send tree instances in small chunks (50 trees per message, stays under 32KB)
-    const chunkSize = 50;
-    const treeInstances = payload.instances[0]?.positions || [];
-    
-    for (let i = 0; i < treeInstances.length; i += chunkSize) {
-      const chunk = treeInstances.slice(i, i + chunkSize);
-      
-      this._sendToWorld({
-        t: "bootstrapUpload",
-        worldId: "local",
-        version: 1,
-        part: "instances",
-        positions: chunk,
-      });
-    }
-
-    // Send colliders
-    if (payload.colliders) {
-      this._sendToWorld({
-        t: "bootstrapUpload",
-        worldId: "local",
-        version: 1,
-        part: "colliders",
-        payload: payload.colliders,
-      });
-    }
+    this._sendToWorld({
+      t: "bootstrapUpload",
+      payload,
+    });
   }
 
   // Send WebRTC signaling
@@ -380,18 +343,18 @@ export class NetworkClient {
         messageIndex++;
       }, 4000); // Update message every 4 seconds
 
-      // Connection timeout - World server can take 15-20 seconds to start in ECS
-      // Adding 60 second timeout for task startup
+      // Connection timeout - World server now starts in ~20 seconds
+      // Adding 30 second buffer for network latency and slow connections
       const connectionTimeout = setTimeout(() => {
         clearInterval(messageInterval);
         if (!this.authenticated) {
           if (this.worldWs) {
             this.worldWs.close();
           }
-          if (log) log(`Connection timeout after 60s`);
+          if (log) log(`Connection timeout after 50s`);
           reject(new Error("Connection timeout"));
         }
-      }, 60000); // 60 seconds to account for ECS task startup
+      }, 50000); // 50 seconds (was 60s when startup was slower)
 
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
