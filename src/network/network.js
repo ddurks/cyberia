@@ -8,6 +8,7 @@ export class NetworkClient {
     this.playerId = null;
     this.token = null;
     this.worldEndpoint = null;
+    this.worldId = null; // Store worldId for bootstrap upload
     this.authenticated = false;
     this.joined = false;
     this.connected = false; // Master connection flag
@@ -189,6 +190,8 @@ export class NetworkClient {
           clearInterval(checkJoined);
           this._sendToWorld({
             t: "bootstrapUpload",
+            worldId: this.worldId,
+            version: 1,
             payload,
           });
         }
@@ -198,6 +201,8 @@ export class NetworkClient {
 
     this._sendToWorld({
       t: "bootstrapUpload",
+      worldId: this.worldId,
+      version: 1,
       payload,
     });
   }
@@ -272,6 +277,8 @@ export class NetworkClient {
           if (this.onStatus)
             this.onStatus("Entry Visa Granted! Preparing Transport...");
           this.matchmakerWs.removeEventListener("message", handler);
+          // Store worldId for later use in bootstrap upload
+          this.worldId = worldId;
           // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
           this.worldEndpoint = {
             url: `wss://${msg.endpoint.ip}`,
