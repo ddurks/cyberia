@@ -18,6 +18,9 @@ export class ChatUI {
   }
 
   create() {
+    if (this.chatButton) {
+      return;
+    }
     // Create chat button
     this.chatButton = document.createElement("button");
     this.chatButton.id = "chat-button";
@@ -42,6 +45,7 @@ export class ChatUI {
       transition: all 0.2s ease;
       box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
       pointer-events: auto;
+      display: block;
     `;
 
     // Button hover effect
@@ -101,6 +105,7 @@ export class ChatUI {
 
     // Create textarea instead of input for multiline support
     this.input = document.createElement("textarea");
+    this.input.id = "chat-input";
     this.input.placeholder = "Type message... (max 256 chars)";
     this.input.maxLength = 256;
     this.input.style.cssText = `
@@ -117,7 +122,6 @@ export class ChatUI {
       text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
       border-radius: 4px;
       resize: none;
-      overflow-y: auto;
       line-height: 1.4;
     `;
 

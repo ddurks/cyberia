@@ -152,7 +152,6 @@ body.mobile #hud-container.visible {
   width: 100%;
   height: auto;
   display: block;
-  position: relative;
   z-index: 102;
 }
 

@@ -7,7 +7,7 @@ import { NetworkClient } from "./network/network.js";
 import { MultiplayerManager } from "./network/multiplayer.js";
 import { WorldGenerator } from "./world/worldgen.js";
 import { getNetworkConfig } from "./core/config.js";
-import { LoadingScreen } from "./ui/loadingScreen.js";
+import { MainMenu } from "./ui/mainMenu.js";
 import { ChatUI } from "./ui/chatUI.js";
 import { ChatBubbleRenderer } from "./effects/chatBubbles.js";
 import {
@@ -71,6 +71,7 @@ document.addEventListener(
 let networkClient = null;
 let multiplayerManager = null;
 let worldGenerator = null;
+let mainMenu = null;
 const MULTIPLAYER_ENABLED = true; // Set to false to disable
 
 const scene = new THREE.Scene();
@@ -83,11 +84,13 @@ let serverUpdateInterval = 0;
 
 // Generate random coat color early so it's available for network connection
 // Colors are 0-255 for network transmission, will be converted to 0-1 for Three.js
-const randomCoatColor = {
+let randomCoatColor = {
   r: Math.floor(Math.random() * 256),
   g: Math.floor(Math.random() * 256),
   b: Math.floor(Math.random() * 256),
 };
+
+let playerName = "cyberian";
 
 // Initialize multiplayer
 if (MULTIPLAYER_ENABLED) {
@@ -98,15 +101,15 @@ if (MULTIPLAYER_ENABLED) {
 
   // Status callback for loading screen
   networkClient.onStatus = (message) => {
-    if (loadingScreen) {
-      loadingScreen.setStatus(message);
+    if (mainMenu && mainMenu.isLoading) {
+      mainMenu.setLoadingStatus(message);
     }
   };
 
   // Progress callback - real progress from server
   networkClient.onProgress = (percent, elapsed) => {
-    if (loadingScreen) {
-      loadingScreen.setProgress(percent);
+    if (mainMenu && mainMenu.isLoading) {
+      mainMenu.setLoadingProgress(percent);
     }
   };
 
@@ -120,17 +123,22 @@ if (MULTIPLAYER_ENABLED) {
         chatMsg.playerId,
         chatMsg.playerName,
         chatMsg.text,
-        playerPos
+        playerPos,
       );
-    } else if (multiplayerManager && multiplayerManager.networkPlayers.has(chatMsg.playerId)) {
+    } else if (
+      multiplayerManager &&
+      multiplayerManager.networkPlayers.has(chatMsg.playerId)
+    ) {
       // Remote player
-      const networkPlayer = multiplayerManager.networkPlayers.get(chatMsg.playerId);
+      const networkPlayer = multiplayerManager.networkPlayers.get(
+        chatMsg.playerId,
+      );
       const playerPos = networkPlayer.model.position.clone();
       chatBubbleRenderer.addChatBubble(
         chatMsg.playerId,
         chatMsg.playerName,
         chatMsg.text,
-        playerPos
+        playerPos,
       );
     }
   };
@@ -199,16 +207,44 @@ if (MULTIPLAYER_ENABLED) {
 
   // Store connection config - we'll connect AFTER scene is ready
   window._pendingNetworkConnection = async () => {
+    // Remove loading elements completely from DOM
+    const loadingBg = document.getElementById("loading-bg");
+    const loadingImg = document.getElementById("loading");
+    if (loadingBg && loadingBg.parentNode)
+      loadingBg.parentNode.removeChild(loadingBg);
+    if (loadingImg && loadingImg.parentNode)
+      loadingImg.parentNode.removeChild(loadingImg);
+
+    // First, show character customizer
+    if (!mainMenu) {
+      mainMenu = new MainMenu();
+      await mainMenu.create();
+    }
+
+    mainMenu.onConfirm = async (customization) => {
+      // Update player settings from customizer
+      randomCoatColor = customization.coatColor;
+      playerName = customization.name;
+      networkClient.playerName = customization.name;
+      networkClient.coatColor = customization.coatColor;
+
+      // Now show loading screen and proceed with network connection
+      await _connectToNetwork();
+    };
+
+    mainMenu.open();
+  };
+
+  async function _connectToNetwork() {
     const config = getNetworkConfig();
-    // Create global loading screen instance if not already created
-    if (!loadingScreen) {
-      loadingScreen = new LoadingScreen();
-      loadingScreen.show();
+    // Customizer already has loading state via transitionToLoading()
+    // Just set the initial status
+    if (mainMenu && mainMenu.isLoading) {
+      mainMenu.setLoadingStatus("Contacting Local Commissariat...");
     }
 
     if (config.mode === "direct") {
       // Local development: direct connection to world server
-      loadingScreen.setStatus("Contacting Local Commissariat...");
       const { LOCAL_DEV_TOKEN } = await import("./core/config.js");
       networkClient
         .connectDirectly(
@@ -218,25 +254,46 @@ if (MULTIPLAYER_ENABLED) {
         )
         .then(() => {
           networkAttemptComplete = true;
+          if (mainMenu && mainMenu.isOpen) {
+            mainMenu.close();
+          }
           checkAllLoadingComplete();
         })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.setStatus(
-            "State Infrastructure Unavailable. Proceeding Offline.",
-          );
+          // Hide character customizer and show offline mode
+          if (mainMenu) {
+            mainMenu.close();
+          }
+          // Show offline mode message
+          const onlineStatusDiv = document.getElementById("online-status");
+          if (onlineStatusDiv) onlineStatusDiv.className = "offline";
+          const statusText = document.getElementById("status-text");
+          if (statusText) statusText.innerHTML = "offline";
+          // Hide loading elements
+          const loadingBg = document.getElementById("loading-bg");
+          if (loadingBg) loadingBg.style.display = "none";
+          const loadingImg = document.getElementById("loading");
+          if (loadingImg) loadingImg.style.display = "none";
+          // Show HUD for offline mode
+          const hudContainer = document.getElementById("hud-container");
+          if (hudContainer) hudContainer.classList.add("visible");
           networkAttemptComplete = true;
           checkAllLoadingComplete();
         });
     } else if (config.mode === "matchmaker") {
       // Production: connect through matchmaker
-      loadingScreen.setStatus("Establishing Link to Central Authority...");
+      if (mainMenu && mainMenu.isLoading) {
+        mainMenu.setLoadingStatus("Establishing Link to Central Authority...");
+      }
       networkClient
         .connectToMatchmaker(config.matchmakerUrl)
         .then(() => {
-          loadingScreen.setStatus(
-            "Requesting World Allocation from State Planning Committee...",
-          );
+          if (mainMenu && mainMenu.isLoading) {
+            mainMenu.setLoadingStatus(
+              "Requesting World Allocation from State Planning Committee...",
+            );
+          }
           return networkClient.createAndJoinWorld(
             "cyberia",
             null,
@@ -245,18 +302,35 @@ if (MULTIPLAYER_ENABLED) {
         })
         .then(() => {
           networkAttemptComplete = true;
+          if (mainMenu && mainMenu.isOpen) {
+            mainMenu.close();
+          }
           checkAllLoadingComplete();
         })
         .catch((err) => {
           console.error("❌ Network error:", err);
-          loadingScreen.setStatus(
-            "Ministry of Digital Infrastructure Reports Delays. Proceeding Offline.",
-          );
+          // Hide character customizer and show offline mode
+          if (mainMenu) {
+            mainMenu.close();
+          }
+          // Show offline mode message
+          const onlineStatusDiv = document.getElementById("online-status");
+          if (onlineStatusDiv) onlineStatusDiv.className = "offline";
+          const statusText = document.getElementById("status-text");
+          if (statusText) statusText.innerHTML = "offline";
+          // Hide loading elements
+          const loadingBg = document.getElementById("loading-bg");
+          if (loadingBg) loadingBg.style.display = "none";
+          const loadingImg = document.getElementById("loading");
+          if (loadingImg) loadingImg.style.display = "none";
+          // Show HUD for offline mode
+          const hudContainer = document.getElementById("hud-container");
+          if (hudContainer) hudContainer.classList.add("visible");
           networkAttemptComplete = true;
           checkAllLoadingComplete();
         });
     }
-  };
+  }
 
   networkClient.onDisconnected = () => {
     const onlineStatusDiv = document.getElementById("online-status");
@@ -513,6 +587,23 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   }
 });
 
+// Initialize chat UI after all assets are loaded
+THREE.DefaultLoadingManager.onLoad = () => {
+  console.log("[Assets] All assets loaded");
+  assetsLoaded = true;
+  checkAndStartGame();
+
+  // Connect to network AFTER assets are loaded and scene is ready
+  // This prevents main thread blocking during WebSocket handshake on iOS
+  if (window._pendingNetworkConnection && !networkConnectionInitiated) {
+    networkConnectionInitiated = true;
+    // Use setTimeout to ensure we're not blocking
+    setTimeout(() => {
+      window._pendingNetworkConnection();
+    }, 100);
+  }
+};
+
 const clock = new THREE.Clock();
 let frameCount = 0;
 
@@ -701,26 +792,26 @@ function animate() {
   orbitControls.update();
   wind.update();
   footprintSystem.update(deltaT);
-  
+
   // Update chat bubbles with player positions
   if (chatBubbleRenderer) {
     const playerPositions = new Map();
-    
+
     // Add local player position
     if (guy && networkClient && networkClient.playerId) {
       playerPositions.set(networkClient.playerId, guy.position);
     }
-    
+
     // Add remote player positions
     if (multiplayerManager) {
       for (const [playerId, player] of multiplayerManager.networkPlayers) {
         playerPositions.set(playerId, player.model.position);
       }
     }
-    
+
     chatBubbleRenderer.update(playerPositions);
   }
-  
+
   level.updateSnowfall();
   renderer.render(scene, camera);
   frameCount++;
@@ -812,14 +903,23 @@ function updatePlayerFootsteps() {
 let assetsLoaded = false;
 let loadStartTime = Date.now();
 let networkConnectionInitiated = false;
-let loadingScreen = null; // Will hold the LoadingScreen instance
 let networkAttemptComplete = false;
 let sceneReady = false;
 
 function checkAllLoadingComplete() {
   // Only hide loading screen when BOTH scene is ready AND network attempt is complete (success or failure)
-  if (sceneReady && networkAttemptComplete && loadingScreen) {
-    loadingScreen.complete();
+  if (sceneReady && networkAttemptComplete) {
+    // Hide customizer if in loading state
+    if (mainMenu && mainMenu.isOpen) {
+      mainMenu.close();
+    }
+    // Show HUD - force visible immediately
+    const hudContainer = document.getElementById("hud-container");
+    if (hudContainer) {
+      hudContainer.classList.add("visible");
+      // Force immediate visibility with inline style as fallback
+      hudContainer.style.opacity = "1";
+    }
   }
 }
 
@@ -844,20 +944,21 @@ function checkAndStartGame() {
 
   if (!loading || !loadingBG) {
     animate();
+    sceneReady = true;
+    checkAllLoadingComplete();
     return;
   }
 
   const elapsed = Date.now() - loadStartTime;
-  const minimumLoadTime = 3600; // 4 seconds for initial gif
+  const minimumLoadTime = 1000; // 1 second minimum before starting animation
 
   if (elapsed < minimumLoadTime) {
-    // Wait until 4 seconds have passed
+    // Wait until 1 second has passed
     setTimeout(checkAndStartGame, minimumLoadTime - elapsed);
     return;
   }
 
-  // Start animation, but DON'T hide loading screen yet
-  // The network connection will hide it when ready via loadingScreen.complete()
+  // Start animation
   animate();
   sceneReady = true;
   checkAllLoadingComplete();

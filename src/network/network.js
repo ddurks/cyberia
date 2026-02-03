@@ -16,6 +16,10 @@ export class NetworkClient {
     this.joined = false;
     this.connected = false; // Master connection flag
 
+    // Player customization
+    this.playerName = "Player";
+    this.coatColor = { r: 255, g: 255, b: 255 };
+
     // Voice manager for proximity audio
     this.voiceManager = null;
 
@@ -92,6 +96,13 @@ export class NetworkClient {
 
       const onCloseHandler = (event) => {
         log(`Matchmaker connection closed: code=${event.code}`);
+        // Auto-reload on abnormal closure (1006) or server restart (1011)
+        if (event.code === 1006 || event.code === 1011) {
+          log("Unexpected disconnect, reloading page...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
       };
 
       this.matchmakerWs.addEventListener("open", onOpenHandler);
@@ -120,7 +131,9 @@ export class NetworkClient {
     }
 
     // Store coat color for later use when connecting to world server
-    this.coatColor = coatColor;
+    if (coatColor) {
+      this.coatColor = coatColor;
+    }
 
     // Create world if no worldId provided
     if (!worldId) {
@@ -142,7 +155,9 @@ export class NetworkClient {
   // Connect directly to world server (bypass matchmaker for local dev)
   async connectDirectly(worldServerUrl, token, coatColor) {
     this.token = token;
-    this.coatColor = coatColor;
+    if (coatColor) {
+      this.coatColor = coatColor;
+    }
     this.worldEndpoint = { url: worldServerUrl };
     await this._connectToWorldServer();
   }
@@ -389,7 +404,7 @@ export class NetworkClient {
 
                   this._sendToWorld({
                     t: "join",
-                    name: "Player",
+                    name: this.playerName,
                     coatColor: this.coatColor,
                   });
                 } catch (error) {
@@ -423,7 +438,7 @@ export class NetworkClient {
             // (server will queue it until auth completes)
             this._sendToWorld({
               t: "join",
-              name: "Player",
+              name: this.playerName,
               coatColor: this.coatColor,
             });
           } catch (error) {
@@ -484,6 +499,13 @@ export class NetworkClient {
           clearTimeout(connectionTimeout);
           this.authenticated = false;
           this.joined = false;
+          // Auto-reload on abnormal closure (1006) or server restart (1011)
+          if (event.code === 1006 || event.code === 1011) {
+            console.log("World server disconnected unexpectedly, reloading page...");
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }
         };
       } catch (error) {
         clearTimeout(connectionTimeout);
