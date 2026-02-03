@@ -94,6 +94,13 @@ if (MULTIPLAYER_ENABLED) {
     }
   };
 
+  // Progress callback - real progress from server
+  networkClient.onProgress = (percent, elapsed) => {
+    if (loadingScreen) {
+      loadingScreen.setProgress(percent);
+    }
+  };
+
   networkClient.onConnected = (playerId) => {
     multiplayerManager.setLocalPlayerId(playerId);
     _playerJustConnected = true;

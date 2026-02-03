@@ -21,6 +21,7 @@ export class NetworkClient {
     this.onVoicePeers = null;
     this.onError = null;
     this.onStatus = null; // Status updates for loading screen
+    this.onProgress = null; // Progress percentage updates (percent, elapsed)
 
     this.inputSeq = 0;
     this.lastSentInput = null;
@@ -272,7 +273,19 @@ export class NetworkClient {
       const handler = (msg) => {
         console.log("[_joinWorld] Received message:", msg.t);
 
-        if (msg.t === "joinResult") {
+        if (msg.t === "status") {
+          // Real-time progress updates from server startup
+          console.log(
+            `[_joinWorld] Status: ${msg.msg}, progress: ${msg.progress}%`,
+          );
+          if (this.onStatus) {
+            this.onStatus(msg.msg);
+          }
+          // Callback for progress updates
+          if (this.onProgress) {
+            this.onProgress(msg.progress, msg.elapsed);
+          }
+        } else if (msg.t === "joinResult") {
           console.log("[_joinWorld] Got joinResult, removing handler");
           if (this.onStatus)
             this.onStatus("Entry Visa Granted! Preparing Transport...");
@@ -328,32 +341,9 @@ export class NetworkClient {
       if (this.onStatus)
         this.onStatus("Your Patience Serves The Collective, Comrade...");
 
-      // Progressive status messages during long ECS startup
-      const sovietMessages = [
-        "Allocating Server Resources from State Reserves...",
-        "Awakening Dormant Production Facilities...",
-        "Five-Year Plan Requires Patience, Comrade...",
-        "Workers Are Stoking The Digital Boilers...",
-        "Central Processing Committee is Convening...",
-        "Infrastructure Commissar is Reviewing Protocols...",
-        "Nearly Ready, Glory to Digital Proletariat!",
-      ];
-      let messageIndex = 0;
-      const messageInterval = setInterval(() => {
-        if (this.authenticated || messageIndex >= sovietMessages.length) {
-          clearInterval(messageInterval);
-          return;
-        }
-        if (this.onStatus) {
-          this.onStatus(sovietMessages[messageIndex]);
-        }
-        messageIndex++;
-      }, 4000); // Update message every 4 seconds
-
       // Connection timeout - World server now starts in ~20 seconds
       // Adding 30 second buffer for network latency and slow connections
       const connectionTimeout = setTimeout(() => {
-        clearInterval(messageInterval);
         if (!this.authenticated) {
           if (this.worldWs) {
             this.worldWs.close();
@@ -570,7 +560,9 @@ export class NetworkClient {
       const json = JSON.stringify(msg);
       // Log message size for large messages
       if (json.length > 50000) {
-        console.warn(`[Network] Large message being sent: ${(json.length / 1024).toFixed(2)}KB (type: ${msg.t})`);
+        console.warn(
+          `[Network] Large message being sent: ${(json.length / 1024).toFixed(2)}KB (type: ${msg.t})`,
+        );
       }
       this.worldWs.send(json);
     }

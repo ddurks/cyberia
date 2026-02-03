@@ -4,7 +4,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background-color: #ddeeff;
+  background-color: #262626;
   /* Ensure proper viewport handling on mobile */
   position: fixed;
   top: 0;
@@ -13,14 +13,15 @@ html, body {
 
 #cyberia-logo {
   position: absolute;
-  top: 20px;
+  top: 20%;
   left: 50%;
   transform: translateX(-50%);
   width: 250px !important;
   height: auto;
   z-index: 10001;
   pointer-events: none;
-  opacity: 0.9;  transition: opacity 0.3s ease;}
+  transition: opacity 0.3s ease;
+}
 
 #online-status {
   position: absolute;
@@ -200,7 +201,7 @@ body.mobile #hud-container {
 
 #loading {
   position: fixed;
-  top: 50%;
+  top: 65%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: 400px;
@@ -215,32 +216,42 @@ body.mobile #hud-container {
 
 #loading-bg {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   z-index: 9999;
-  background-color: #ddeeff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background-color: white;
   pointer-events: none;
-  overflow: hidden;
   opacity: 1;
   transition: opacity 0.5s ease;
 }
 
-#loading-bg > img:not(#cyberia-logo) {
-  width: 100vmax;
-  height: 100vmax;
+#loading-image-container {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 250px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+  pointer-events: none;
+}
+
+#loading-image-container > img:first-child {
+  width: calc(250px * 5 / 8);
+  height: auto;
   object-fit: contain;
-  max-width: none;
-  max-height: none;
   image-rendering: pixelated;
 }
 
-#loading-bg::before {
-  content: '';
+#loading-frame {
   position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 9999;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
   pointer-events: none;
+  z-index: 10;
 }

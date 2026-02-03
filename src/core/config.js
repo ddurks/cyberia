@@ -32,8 +32,7 @@ export const NetworkConfig = {
 
   // Production (AWS deployment with matchmaker)
   PRODUCTION: {
-    // API Gateway WebSocket endpoint
-    matchmakerUrl: "wss://rgql18mbab.execute-api.us-east-2.amazonaws.com/prod/",
+    matchmakerUrl: "wss://matchmaker.drawvid.com/",
     mode: "matchmaker",
   },
 };
