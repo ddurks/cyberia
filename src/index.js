@@ -207,19 +207,20 @@ if (MULTIPLAYER_ENABLED) {
 
   // Store connection config - we'll connect AFTER scene is ready
   window._pendingNetworkConnection = async () => {
-    // Remove loading elements completely from DOM
+    // First, show character customizer
+    if (!mainMenu) {
+      mainMenu = new MainMenu();
+      await mainMenu.create();
+    }
+
+    // Remove loading elements only AFTER menu is created and about to open
+    // This prevents the 3D scene from being visible briefly
     const loadingBg = document.getElementById("loading-bg");
     const loadingImg = document.getElementById("loading");
     if (loadingBg && loadingBg.parentNode)
       loadingBg.parentNode.removeChild(loadingBg);
     if (loadingImg && loadingImg.parentNode)
       loadingImg.parentNode.removeChild(loadingImg);
-
-    // First, show character customizer
-    if (!mainMenu) {
-      mainMenu = new MainMenu();
-      await mainMenu.create();
-    }
 
     mainMenu.onConfirm = async (customization) => {
       // Update player settings from customizer
