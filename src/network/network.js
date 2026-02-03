@@ -138,18 +138,22 @@ export class NetworkClient {
     // Create world if no worldId provided
     if (!worldId) {
       log("Creating new world...");
+      if (this.onProgress) this.onProgress(10, 0);
       worldId = await this._createWorld(gameKey);
       log(`World created: ${worldId}`);
     }
 
     // Join the world
     log(`Joining world: ${worldId}`);
+    if (this.onProgress) this.onProgress(30, 0);
     await this._joinWorld(gameKey, worldId);
     log(`World joined, connecting to world server...`);
 
     // Connect to world server
+    if (this.onProgress) this.onProgress(50, 0);
     await this._connectToWorldServer();
     log(`Connected to world server!`);
+    if (this.onProgress) this.onProgress(100, 0);
   }
 
   // Connect directly to world server (bypass matchmaker for local dev)
@@ -159,7 +163,9 @@ export class NetworkClient {
       this.coatColor = coatColor;
     }
     this.worldEndpoint = { url: worldServerUrl };
+    if (this.onProgress) this.onProgress(50, 0);
     await this._connectToWorldServer();
+    if (this.onProgress) this.onProgress(100, 0);
   }
 
   // Send input to world server
