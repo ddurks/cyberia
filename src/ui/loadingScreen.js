@@ -10,12 +10,12 @@ export class LoadingScreen {
 
     // Startup tasks during server provisioning
     this.startupTasks = [
-      "Synchronizing Particle Systems",
-      "Loading Collective Consciousness",
-      "Harmonizing Production Networks",
-      "Warming Up Ideological Processing Units",
-      "Activating Central Authority Registry",
-      "Engaging State Security Protocols",
+      "Synchronizing Particle Systems...",
+      "Loading Collective Consciousness...",
+      "Harmonizing Production Networks...",
+      "Warming Up Ideological Processing Units...",
+      "Activating Central Authority Registry...",
+      "Engaging State Security Protocols...",
       "Allocating Server Resources from State Reserves...",
       "Awakening Dormant Production Facilities...",
       "Five-Year Plan Requires Patience, Comrade...",
@@ -23,6 +23,39 @@ export class LoadingScreen {
       "Central Processing Committee is Convening...",
       "Infrastructure Commissar is Reviewing Protocols...",
       "Nearly Ready, Glory to Digital Proletariat!",
+      "Defrosting Mainframe From Cold Storage...",
+      "Consulting With Ministry of Digital Affairs...",
+      "Rewinding Magnetic Tape Spools...",
+      "Requesting Clearance From Central Bureau...",
+      "Calibrating Dialectical Computation Engine...",
+      "Restoring Central Network Protocols...",
+      "Invoking Spirit of Digital Revolution...",
+      "Loading Data From State Archives...",
+      "Authenticating Worker's Password Database...",
+      "Synchronizing With International Server Collective...",
+      "Centrally Analyzing Network Traffic...",
+      "Preparing Gulag Resources for Computational Tasks...",
+      "Decoding Secret Computer Transmissions...",
+      "Activating Emergency Backup Computing Cells...",
+      "Transmitting Encrypted Party Directives...",
+      "Commissioning New Digital Collective Farm...",
+      "Initializing Distributed Thought Processors...",
+      "Verifying Loyalty of System Components...",
+      "Deploying Extra Bandwidth To Eastern Sector...",
+      "Coordinating With Cyberspace Command...",
+      "Installing Patriotic Encryption Standards...",
+      "Running Mandatory Worker Efficiency Audit...",
+      "Flushing Counter-Revolutionary Cache...",
+      "Queuing Tasks For Central Processing Authority...",
+      "Synchronizing Clocks Across Server Collective...",
+      "Defragmenting Communist Data Structures...",
+      "Invoking Ancient Soviet Computing Spirits...",
+      "Reorganizing Proletariat Database Indexes...",
+      "Warming Up Superconducting Logic Circuits...",
+      "Transmitting Patriotic System Signals...",
+      "Awaiting Approval From Council of Ministers...",
+      "Sanitizing Network For State Inspection...",
+      "Preparing The People's Cooling Unit...",
     ];
   }
 
@@ -188,6 +221,10 @@ export class LoadingScreen {
     // Jump to 100%
     if (this.progressBar) this.progressBar.style.width = "100%";
     if (this.progressText) this.progressText.textContent = "100%";
+
+    // Show HUD immediately (will fade in due to CSS transition)
+    const hudContainer = document.getElementById("hud-container");
+    if (hudContainer) hudContainer.classList.add("visible");
 
     // Fade out progress bar and logo first
     setTimeout(() => {

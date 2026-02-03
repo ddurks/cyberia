@@ -8,6 +8,8 @@ import { MultiplayerManager } from "./network/multiplayer.js";
 import { WorldGenerator } from "./world/worldgen.js";
 import { getNetworkConfig } from "./core/config.js";
 import { LoadingScreen } from "./ui/loadingScreen.js";
+import { ChatUI } from "./ui/chatUI.js";
+import { ChatBubbleRenderer } from "./effects/chatBubbles.js";
 import {
   CharacterControls,
   footBoneNames,
@@ -42,11 +44,18 @@ if (
 }
 document.body.classList.add(IS_MOBILE ? "mobile" : "desktop");
 
+// Controls object that can be disabled (e.g., when typing in chat)
+const controls = {
+  disabled: false,
+};
+
 const keysPressed = {};
 document.addEventListener(
   "keydown",
   (event) => {
-    keysPressed[event.key.toLowerCase()] = true;
+    if (!controls.disabled) {
+      keysPressed[event.key.toLowerCase()] = true;
+    }
   },
   false,
 );
@@ -98,6 +107,31 @@ if (MULTIPLAYER_ENABLED) {
   networkClient.onProgress = (percent, elapsed) => {
     if (loadingScreen) {
       loadingScreen.setProgress(percent);
+    }
+  };
+
+  // Chat message callback - display chat bubbles above players
+  networkClient.onChat = (chatMsg) => {
+    // Find the player to display chat above them
+    if (chatMsg.playerId === networkClient.playerId) {
+      // Local player - use their position
+      const playerPos = guy.position.clone();
+      chatBubbleRenderer.addChatBubble(
+        chatMsg.playerId,
+        chatMsg.playerName,
+        chatMsg.text,
+        playerPos
+      );
+    } else if (multiplayerManager && multiplayerManager.networkPlayers.has(chatMsg.playerId)) {
+      // Remote player
+      const networkPlayer = multiplayerManager.networkPlayers.get(chatMsg.playerId);
+      const playerPos = networkPlayer.model.position.clone();
+      chatBubbleRenderer.addChatBubble(
+        chatMsg.playerId,
+        chatMsg.playerName,
+        chatMsg.text,
+        playerPos
+      );
     }
   };
 
@@ -256,7 +290,6 @@ const getContainerSize = () => {
 };
 
 const { width: initialWidth, height: initialHeight } = getContainerSize();
-console.log("[Init] Canvas size:", initialWidth, "x", initialHeight);
 
 renderer.setSize(initialWidth, initialHeight, false);
 renderer.setPixelRatio(IS_MOBILE ? 1 : window.devicePixelRatio);
@@ -350,6 +383,10 @@ const footprintSystem = new FootprintSystem(
   raycaster,
   downVector,
 );
+
+// Chat UI and bubble renderer
+let chatUI = null;
+let chatBubbleRenderer = null;
 
 // Set footprint system reference for multiplayer
 if (multiplayerManager) {
@@ -464,6 +501,15 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   if (multiplayerManager) {
     multiplayerManager.localCharacter = guy;
     // Local character reference set
+  }
+
+  // Initialize chat UI and bubbles now that scene is fully ready
+  if (!chatUI && networkClient) {
+    chatUI = new ChatUI(networkClient, IS_MOBILE, controls);
+    chatUI.create();
+  }
+  if (!chatBubbleRenderer) {
+    chatBubbleRenderer = new ChatBubbleRenderer(scene, camera);
   }
 });
 
@@ -655,6 +701,26 @@ function animate() {
   orbitControls.update();
   wind.update();
   footprintSystem.update(deltaT);
+  
+  // Update chat bubbles with player positions
+  if (chatBubbleRenderer) {
+    const playerPositions = new Map();
+    
+    // Add local player position
+    if (guy && networkClient && networkClient.playerId) {
+      playerPositions.set(networkClient.playerId, guy.position);
+    }
+    
+    // Add remote player positions
+    if (multiplayerManager) {
+      for (const [playerId, player] of multiplayerManager.networkPlayers) {
+        playerPositions.set(playerId, player.model.position);
+      }
+    }
+    
+    chatBubbleRenderer.update(playerPositions);
+  }
+  
   level.updateSnowfall();
   renderer.render(scene, camera);
   frameCount++;
@@ -867,9 +933,18 @@ function robustMobileResize() {
 
 if (IS_MOBILE) {
   window.addEventListener("orientationchange", () => {
-    console.log("[Mobile] Orientation changed");
     robustMobileResize();
   });
   // Also run after load
   window.addEventListener("load", robustMobileResize);
 }
+
+// Cleanup on disconnect
+window.addEventListener("beforeunload", () => {
+  if (networkClient) {
+    if (networkClient.voiceManager) {
+      networkClient.voiceManager.disconnect();
+    }
+    networkClient.disconnect();
+  }
+});

@@ -1,6 +1,9 @@
 // Network client for connecting to drawvidverse matchmaker and world server
 // Handles WebSocket connections, authentication, and message protocol
 
+import { VoiceManager } from './voiceManager.js';
+import { FEATURES } from '../core/config.js';
+
 export class NetworkClient {
   constructor() {
     this.matchmakerWs = null;
@@ -13,12 +16,16 @@ export class NetworkClient {
     this.joined = false;
     this.connected = false; // Master connection flag
 
+    // Voice manager for proximity audio
+    this.voiceManager = null;
+
     // Callbacks
     this.onConnected = null;
     this.onSnapshot = null;
     this.onBootstrapRequired = null;
     this.onBootstrapData = null;
     this.onVoicePeers = null;
+    this.onChat = null; // Callback for chat messages
     this.onError = null;
     this.onStatus = null; // Status updates for loading screen
     this.onProgress = null; // Progress percentage updates (percent, elapsed)
@@ -210,15 +217,18 @@ export class NetworkClient {
 
   // Send WebRTC signaling
   sendRTCOffer(to, sdp) {
-    this._sendToWorld({ t: "rtcOffer", to, sdp });
+    const msg = { t: "rtcOffer", to, sdp };
+    this._sendToWorld(msg);
   }
 
   sendRTCAnswer(to, sdp) {
-    this._sendToWorld({ t: "rtcAnswer", to, sdp });
+    const msg = { t: "rtcAnswer", to, sdp };
+    this._sendToWorld(msg);
   }
 
   sendRTCIce(to, candidate) {
-    this._sendToWorld({ t: "rtcIce", to, candidate });
+    const msg = { t: "rtcIce", to, candidate };
+    this._sendToWorld(msg);
   }
 
   disconnect() {
@@ -268,16 +278,10 @@ export class NetworkClient {
     return new Promise((resolve, reject) => {
       if (this.onStatus)
         this.onStatus("Awaiting Clearance from Ministry of Entry...");
-      console.log("[_joinWorld] Waiting for joinResult for world:", worldId);
 
       const handler = (msg) => {
-        console.log("[_joinWorld] Received message:", msg.t);
-
         if (msg.t === "status") {
           // Real-time progress updates from server startup
-          console.log(
-            `[_joinWorld] Status: ${msg.msg}, progress: ${msg.progress}%`,
-          );
           if (this.onStatus) {
             this.onStatus(msg.msg);
           }
@@ -286,38 +290,39 @@ export class NetworkClient {
             this.onProgress(msg.progress, msg.elapsed);
           }
         } else if (msg.t === "joinResult") {
-          console.log("[_joinWorld] Got joinResult, removing handler");
           if (this.onStatus)
             this.onStatus("Entry Visa Granted! Preparing Transport...");
           this.matchmakerWs.removeEventListener("message", handler);
           // Store worldId for later use in bootstrap upload
           this.worldId = worldId;
           // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
+          let endpoint = `wss://${msg.endpoint.ip}`;
+          
+          // When running locally, proxy the world server through the dev server
+          if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+            endpoint = `ws://localhost:3000/world-ws`;
+          }
+          
           this.worldEndpoint = {
-            url: `wss://${msg.endpoint.ip}`,
+            url: endpoint,
           };
           this.token = msg.token;
-          console.log("✓ Received world endpoint:", this.worldEndpoint.url);
           resolve();
         } else if (msg.t === "err") {
-          console.log("[_joinWorld] Got error:", msg.msg);
           this.matchmakerWs.removeEventListener("message", handler);
           reject(new Error(msg.msg));
         }
       };
       this.matchmakerWs.addEventListener("message", (e) => {
         const parsed = JSON.parse(e.data);
-        console.log("[_joinWorld] Raw message event:", parsed.t);
         handler(parsed);
       });
 
-      console.log("[_joinWorld] Sending joinWorld request...");
       this._sendToMatchmaker({
         t: "joinWorld",
         gameKey,
         worldId,
       });
-      console.log("[_joinWorld] joinWorld request sent");
     });
   }
 
@@ -341,17 +346,17 @@ export class NetworkClient {
       if (this.onStatus)
         this.onStatus("Your Patience Serves The Collective, Comrade...");
 
-      // Connection timeout - World server now starts in ~20 seconds
-      // Adding 30 second buffer for network latency and slow connections
+      // Connection timeout - World server can take up to 90+ seconds to start
+      // Setting 90 second timeout for slow backend startup
       const connectionTimeout = setTimeout(() => {
         if (!this.authenticated) {
           if (this.worldWs) {
             this.worldWs.close();
           }
-          if (log) log(`Connection timeout after 50s`);
+          if (log) log(`Connection timeout after 90s`);
           reject(new Error("Connection timeout"));
         }
-      }, 50000); // 50 seconds (was 60s when startup was slower)
+      }, 90000); // 90 seconds
 
       // CRITICAL: Create WebSocket and set ALL handlers synchronously
       // to avoid race condition on fast connections / slow mobile devices
@@ -440,6 +445,12 @@ export class NetworkClient {
               this.connected = true; // Mark as fully connected
               this.playerId = msg.playerId;
               if (log) log(`✓ Welcome received, authenticated!`);
+              
+              // Initialize voice manager (if enabled)
+              if (FEATURES.PROXIMITY_VOICE && !this.voiceManager) {
+                this.voiceManager = new VoiceManager(this);
+              }
+              
               if (this.onConnected) {
                 this.onConnected(this.playerId);
               }
@@ -528,8 +539,29 @@ export class NetworkClient {
         break;
 
       case "voicePeers":
+        if (FEATURES.PROXIMITY_VOICE && this.voiceManager && this.playerId) {
+          this.voiceManager.updateVoicePeers(msg.peers, this.playerId);
+        }
         if (this.onVoicePeers) {
           this.onVoicePeers(msg.peers);
+        }
+        break;
+
+      case "rtcOffer":
+        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
+          this.voiceManager.handleRTCOffer(msg.from, msg.sdp);
+        }
+        break;
+
+      case "rtcAnswer":
+        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
+          this.voiceManager.handleRTCAnswer(msg.from, msg.sdp);
+        }
+        break;
+
+      case "rtcIce":
+        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
+          this.voiceManager.handleRTCIce(msg.from, msg.candidate);
         }
         break;
 
@@ -542,6 +574,18 @@ export class NetworkClient {
 
       case "pong":
         // Ping response
+        break;
+
+      case "chat":
+        // Chat message from another player
+        if (this.onChat) {
+          this.onChat({
+            playerId: msg.playerId,
+            playerName: msg.playerName,
+            text: msg.text,
+            timestamp: msg.timestamp,
+          });
+        }
         break;
 
       default:

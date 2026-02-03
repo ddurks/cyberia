@@ -1,6 +1,11 @@
 // Configuration for connecting to backend
 // Switch between local development and production
 
+// Feature flags
+export const FEATURES = {
+  PROXIMITY_VOICE: false, // Set to true to enable WebRTC proximity voice
+};
+
 // Get the host IP from URL (for network access) or use localhost
 const getServerHost = () => {
   // If accessing via IP (e.g., 192.168.1.x:3000), use that IP for server
@@ -38,18 +43,10 @@ export const NetworkConfig = {
 };
 
 // Current environment
-export const CURRENT_ENV =
-  process.env.NODE_ENV === "production" ? "PRODUCTION" : "LOCAL_DIRECT";
+export const CURRENT_ENV = "PRODUCTION";
 
 export function getNetworkConfig() {
   const config = NetworkConfig[CURRENT_ENV];
-  if (typeof window !== "undefined") {
-    console.log("[DEBUG] Environment:", CURRENT_ENV);
-    console.log("[DEBUG] Using config:", config);
-    if (config.matchmakerUrl) {
-      console.log("[DEBUG] WebSocket URL:", config.matchmakerUrl);
-    }
-  }
   return config;
 }
 

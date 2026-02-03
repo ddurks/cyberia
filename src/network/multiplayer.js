@@ -25,11 +25,6 @@ export class MultiplayerManager {
   handleSnapshot(snapshot) {
     if (!snapshot || !snapshot.p) return;
 
-    // Debug: occasionally log raw snapshot data
-    if (Math.random() < 0.01) {
-      // Snapshot received
-    }
-
     // Handle local player state from server (server sends it in 'you' field)
     if (snapshot.you && snapshot.you.id === this.localPlayerId) {
       if (this.onServerState) {
@@ -58,11 +53,6 @@ export class MultiplayerManager {
       if (!currentPlayerIds.has(playerId)) {
         this._removeNetworkPlayer(playerId);
       }
-    }
-
-    // Debug: log player count occasionally
-    if (Math.random() < 0.01) {
-      // Network players updated
     }
   }
 
@@ -133,6 +123,16 @@ export class MultiplayerManager {
       }
 
       this.scene.add(model);
+
+      // Create name tag with player's coat color
+      const nameTag = this._createNameTag(
+        playerData.name,
+        playerData.coatColor,
+      );
+      nameTag.position.copy(model.position);
+      nameTag.position.y -= 0.5; // 0.5 units below player
+      nameTag.renderOrder = 1; // Render over ground but under players/trees
+      this.scene.add(nameTag);
       // Network player added
 
       this.networkPlayers.set(playerData.id, {
@@ -154,6 +154,7 @@ export class MultiplayerManager {
         ),
         grounded: playerData.grounded,
         name: playerData.name,
+        nameTag,
       });
 
       // Done loading
@@ -180,6 +181,9 @@ export class MultiplayerManager {
     const player = this.networkPlayers.get(playerId);
     if (player) {
       this.scene.remove(player.model);
+      if (player.nameTag) {
+        this.scene.remove(player.nameTag);
+      }
       this.networkPlayers.delete(playerId);
     }
   }
@@ -195,9 +199,13 @@ export class MultiplayerManager {
           player.velocity.z * player.velocity.z,
       );
 
-      // Check if there's distance to travel to target (will be moving this frame)
+      // Check if there's distance to travel to target (including vertical for falling)
       const distanceToTarget = Math.sqrt(
         Math.pow(player.targetPosition.x - player.model.position.x, 2) +
+          Math.pow(
+            player.targetPosition.y - 0.35 - player.model.position.y,
+            2,
+          ) +
           Math.pow(player.targetPosition.z - player.model.position.z, 2),
       );
 
@@ -248,13 +256,19 @@ export class MultiplayerManager {
         }
       }
 
+      // Update name tag position
+      if (player.nameTag) {
+        player.nameTag.position.copy(player.model.position);
+        player.nameTag.position.y -= 0.5; // 0.5 units below player
+      }
+
       // Update animation based on whether player has distance to cover
       if (player.mixer && player.animationsMap) {
         const isGrounded = player.grounded;
 
-        // Animate as running if there's significant distance to target position
-        // (the lerp will move them toward it)
-        const isMoving = distanceToTarget > 0.05 && isGrounded;
+        // Animate as running if there's significant distance to target position OR if velocity is non-zero
+        // (the lerp will move them toward it, or they're actively moving)
+        const isMoving = (distanceToTarget > 0.2 || speed > 0.5) && isGrounded;
 
         let targetAnim = "idle";
         if (!isGrounded) {
@@ -280,26 +294,39 @@ export class MultiplayerManager {
     }
   }
 
-  // Create name tag sprite
-  _createNameTag(name) {
+  // Create name tag sprite with player outfit color
+  _createNameTag(name, coatColor) {
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
     canvas.width = 256;
     canvas.height = 64;
 
-    context.fillStyle = "rgba(0, 0, 0, 0.6)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    // Transparent background
+    context.clearRect(0, 0, canvas.width, canvas.height);
 
-    context.fillStyle = "white";
-    context.font = "bold 24px Arial";
+    // Text color matches player outfit
+    let textColor = "#ffffff"; // Default white
+    if (coatColor) {
+      const r = Math.floor(coatColor.r || 0);
+      const g = Math.floor(coatColor.g || 0);
+      const b = Math.floor(coatColor.b || 0);
+      textColor = `rgb(${r}, ${g}, ${b})`;
+    }
+
+    context.fillStyle = textColor;
+    context.font = "bold 28px monospace";
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(name, canvas.width / 2, canvas.height / 2);
 
     const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false, // Render through ground so it's always visible
+    });
     const sprite = new THREE.Sprite(material);
-    sprite.scale.set(2, 0.5, 1);
+    sprite.scale.set(2.5, 0.5, 1);
 
     return sprite;
   }

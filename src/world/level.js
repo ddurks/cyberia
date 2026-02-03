@@ -497,11 +497,10 @@ export class Level {
     const isMoving = playerVelocity && playerVelocity.length() > 0.5;
     const throttleFrames = isMoving ? 3 : 10;
 
-    // TEMPORARILY DISABLED FOR DEBUGGING
-    // this.treeCollisionFrameCounter++;
-    // if (this.treeCollisionFrameCounter % throttleFrames !== 0) {
-    //   return; // Skip this frame
-    // }
+    this.treeCollisionFrameCounter++;
+    if (this.treeCollisionFrameCounter % throttleFrames !== 0) {
+      return; // Skip this frame
+    }
 
     this.treeCollisionData.forEach((data) => {
       if (!data || !data.position) return;
