@@ -94,7 +94,7 @@ export class ChatUI {
       left: 0;
       right: 0;
       display: none;
-      z-index: 101;
+      z-index: -1;
       font-family: 'Courier New', monospace;
       pointer-events: auto;
       padding: 10px 8px;
