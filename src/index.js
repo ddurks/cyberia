@@ -44,6 +44,14 @@ if (
 }
 document.body.classList.add(IS_MOBILE ? "mobile" : "desktop");
 
+// Performance settings based on device
+const PERFORMANCE_CONFIG = {
+  // Reduce update frequencies on mobile
+  footprintUpdateFreq: IS_MOBILE ? 20 : 10, // Only update footprints every N frames
+  obstructableUpdateFreq: IS_MOBILE ? 20 : 10, // Only update terrain collision every N frames
+  chatBubbleUpdateFreq: IS_MOBILE ? 5 : 2, // Less frequent bubble updates
+};
+
 // Controls object that can be disabled (e.g., when typing in chat)
 const controls = {
   disabled: false,
@@ -229,6 +237,24 @@ if (MULTIPLAYER_ENABLED) {
       networkClient.playerName = customization.name;
       networkClient.coatColor = customization.coatColor;
 
+      // Update the local player model's coat color immediately
+      if (guy) {
+        guy.traverse((object) => {
+          if (
+            object.isMesh &&
+            object.material &&
+            object.material.name === "snowsuit"
+          ) {
+            object.material.color.setRGB(
+              customization.coatColor.r / 255,
+              customization.coatColor.g / 255,
+              customization.coatColor.b / 255,
+            );
+          }
+        });
+        guy.userData.coatColor = customization.coatColor;
+      }
+
       // Now show loading screen and proceed with network connection
       await _connectToNetwork();
     };
@@ -344,6 +370,9 @@ if (MULTIPLAYER_ENABLED) {
 const world = new CANNON.World();
 world.defaultContactMaterial.contactEquationStiffness = 1e9;
 world.defaultContactMaterial.contactEquationRelaxation = 4;
+// Reduce physics iterations on mobile to save CPU
+world.solver.iterations = IS_MOBILE ? 2 : 5;
+world.gravity.set(0, -9.82, 0);
 
 const canvasContainer = document.getElementById("canvas-container");
 const canvas = document.getElementById("three-canvas");
@@ -780,7 +809,7 @@ function animate() {
       }
     }
 
-    if (frameCount % 10 === 0) {
+    if (frameCount % PERFORMANCE_CONFIG.obstructableUpdateFreq === 0) {
       level.updateActiveObstructables(characterControls.model.position);
     }
   }
@@ -791,11 +820,19 @@ function animate() {
   }
 
   orbitControls.update();
-  wind.update();
-  footprintSystem.update(deltaT);
+  
+  // Reduce wind updates on mobile
+  if (frameCount % (IS_MOBILE ? 3 : 1) === 0) {
+    wind.update();
+  }
+  
+  // Reduce footprint updates on mobile
+  if (frameCount % PERFORMANCE_CONFIG.footprintUpdateFreq === 0) {
+    footprintSystem.update(deltaT);
+  }
 
-  // Update chat bubbles with player positions
-  if (chatBubbleRenderer) {
+  // Update chat bubbles with player positions (less frequently on mobile)
+  if (chatBubbleRenderer && frameCount % PERFORMANCE_CONFIG.chatBubbleUpdateFreq === 0) {
     const playerPositions = new Map();
 
     // Add local player position
