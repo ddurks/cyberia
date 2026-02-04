@@ -227,6 +227,17 @@ export class NetworkClient {
     });
   }
 
+  // Send dance animation
+  sendDance() {
+    if (!this.worldWs || !this.joined) {
+      return;
+    }
+
+    this._sendToWorld({
+      t: "d", // Dance
+    });
+  }
+
   // Upload world bootstrap (terrain + trees)
   uploadBootstrap(payload) {
     console.log(
@@ -689,6 +700,13 @@ export class NetworkClient {
           this.onGunDisappear({
             playerId: msg.playerId,
           });
+        }
+        break;
+
+      case "d":
+        // Dance
+        if (this.onDance) {
+          this.onDance(msg.playerId);
         }
         break;
 

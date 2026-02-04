@@ -79,6 +79,82 @@ document.addEventListener(
   false,
 );
 
+// Handle tap on own player to trigger dance
+let isDancing = false;
+let danceLoops = 0;
+
+function startDance() {
+  isDancing = true;
+  danceLoops = 0;
+  if (networkClient && networkClient.connected) {
+    networkClient.sendDance();
+  }
+}
+
+function stopDance() {
+  isDancing = false;
+  danceLoops = 0;
+}
+
+document.addEventListener(
+  "touchend",
+  (event) => {
+    if (!guy || !characterControls || !animationsMap.has("dance")) return;
+
+    // Prevent triggering if joystick is being used
+    if (characterControls.joystick && 
+        (characterControls.joystick.forward > 0 || 
+         characterControls.joystick.backward > 0 ||
+         characterControls.joystick.left > 0 ||
+         characterControls.joystick.right > 0)) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2(
+      (touch.clientX / window.innerWidth) * 2 - 1,
+      -(touch.clientY / window.innerHeight) * 2 + 1,
+    );
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObject(guy, true);
+    if (intersects.length > 0) {
+      if (isDancing) {
+        stopDance();
+      } else {
+        startDance();
+      }
+    }
+  },
+  false,
+);
+
+// Handle click on own player (desktop) to trigger dance
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!guy || !characterControls || !animationsMap.has("dance")) return;
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1,
+    );
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObject(guy, true);
+    if (intersects.length > 0) {
+      if (isDancing) {
+        stopDance();
+      } else {
+        startDance();
+      }
+    }
+  },
+  false,
+);
+
 // Multiplayer globals
 let networkClient = null;
 let multiplayerManager = null;
@@ -247,6 +323,12 @@ if (MULTIPLAYER_ENABLED) {
   networkClient.onBulletHit = (hitData) => {
     if (multiplayerManager) {
       multiplayerManager.handleBulletHit(hitData);
+    }
+  };
+
+  networkClient.onDance = (playerId) => {
+    if (multiplayerManager) {
+      multiplayerManager.playDanceAnimation(playerId);
     }
   };
 
@@ -661,6 +743,9 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
     animationsMap.set(a.name, action);
   });
   animationsMap.get("jump").setLoop(THREE.LoopOnce);
+  if (animationsMap.has("dance")) {
+    animationsMap.get("dance").setLoop(THREE.LoopOnce);
+  }
   animationsMap.get("idle").fadeIn(5).play();
 
   characterControls = new CharacterControls(
@@ -760,8 +845,23 @@ function animate() {
   let deltaT = clock.getDelta();
 
   if (characterControls) {
+    // Stop dancing if player moves or jumps
+    const directionPressed = ["w", "a", "s", "d"].some(
+      (key) => keysPressed[key] === true,
+    );
+    const joystickPressed = characterControls.joystick
+      ? ["forward", "back", "left", "right"].some(
+          (key) => characterControls.joystick[key] > 0,
+        )
+      : false;
+    const jumpRequested = keysPressed[" "] || characterControls.aPressed;
+
+    if (directionPressed || joystickPressed || jumpRequested) {
+      isDancing = false;
+    }
+
     // Apply movement BEFORE physics step (matches server)
-    characterControls.update(deltaT, keysPressed, body, raycaster, downVector);
+    characterControls.update(deltaT, keysPressed, body, raycaster, downVector, isDancing);
 
     // Update tree collisions BEFORE physics step so bodies exist during collision detection
     level.updateTreeCollisions(

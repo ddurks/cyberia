@@ -53,7 +53,7 @@ export class CharacterControls {
     this.skeleton = this.skinnedMesh ? this.skinnedMesh.skeleton : null;
   }
 
-  update(delta, keysPressed, body, raycaster, downVector) {
+  update(delta, keysPressed, body, raycaster, downVector, isDancing = false) {
     const directionPressed = DIRECTIONS.some(
       (key) => keysPressed[key] === true,
     );
@@ -79,7 +79,9 @@ export class CharacterControls {
     }
 
     let play = this.currentAction;
-    if (this.isStartingJump) {
+    if (isDancing) {
+      play = "dance";
+    } else if (this.isStartingJump) {
       play = "jump";
     } else if (directionPressed || joystickPressed) {
       if (this.isJumping) {
@@ -96,15 +98,32 @@ export class CharacterControls {
       play = "idle";
     }
 
+    const danceCallback =
+      isDancing && play === "dance"
+        ? () => {
+            // Dance animation completed once, increment counter
+            if (window.danceLoops !== undefined) {
+              window.danceLoops++;
+              if (window.danceLoops >= 3) {
+                // Stop dancing after 3 loops
+                if (window.stopDance) {
+                  window.stopDance();
+                }
+              }
+            }
+          }
+        : undefined;
+
     this.updateAnim(
       play,
       delta,
-      this.isStartingJump
-        ? () => {
-            this.isStartingJump = false;
-            // isJumping is already set, will be cleared when landing
-          }
-        : undefined,
+      danceCallback ||
+        (this.isStartingJump
+          ? () => {
+              this.isStartingJump = false;
+              // isJumping is already set, will be cleared when landing
+            }
+          : undefined),
     );
     if (this.level.planeMeshes) {
       this.adjustHeightFromTerrain(body, raycaster, downVector);

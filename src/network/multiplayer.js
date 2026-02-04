@@ -506,6 +506,38 @@ export class MultiplayerManager {
     // Visual effect could be added here (particle effect, etc)
   }
 
+  playDanceAnimation(playerId) {
+    const player = this.players.get(playerId);
+    if (!player || !player.mixer) return;
+
+    const danceAction = player.animationsMap?.get("dance");
+    if (!danceAction) return;
+
+    // Play dance 3 times
+    let loopCount = 0;
+    danceAction.reset();
+    danceAction.clampWhenFinished = false;
+
+    const onDanceFinish = () => {
+      loopCount++;
+      if (loopCount < 3) {
+        danceAction.reset();
+        danceAction.play();
+      } else {
+        // Return to idle after 3 loops
+        const idleAction = player.animationsMap?.get("idle");
+        if (idleAction) {
+          danceAction.stop();
+          idleAction.play();
+        }
+        player.mixer.removeEventListener("finished", onDanceFinish);
+      }
+    };
+
+    player.mixer.addEventListener("finished", onDanceFinish);
+    danceAction.play();
+  }
+
   // Create visual bullet on client (for remote player bullets)
   spawnBullet(bulletId, posX, posY, posZ, velX, velY, velZ, playerId) {
     if (!this.bulletModel) return;
