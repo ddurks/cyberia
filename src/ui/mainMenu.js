@@ -21,7 +21,39 @@ export class MainMenu {
     this.onConfirm = null;
     this.animationFrameId = null;
     this.contentWrapper = null;
+    this.quipIndex = 0;
+    this.quipRotationInterval = null;
+    this.realProgress = 0; // Real progress from server
+    this.displayedProgress = 0; // Displayed progress (smoothed)
+    this.progressAnimationId = null;
     this.quips = [
+      "Synchronizing Particle Systems...",
+      "Loading Collective Consciousness...",
+      "Harmonizing Production Networks...",
+      "Warming Up Ideological Processing Units...",
+      "Activating Central Authority Registry...",
+      "Engaging State Security Protocols...",
+      "Allocating Server Resources from State Reserves...",
+      "Awakening Dormant Production Facilities...",
+      "Five-Year Plan Requires Patience, Comrade...",
+      "Workers Are Stoking The Digital Boilers...",
+      "Central Processing Committee is Convening...",
+      "Infrastructure Commissar is Reviewing Protocols...",
+      "Nearly Ready, Glory to Digital Proletariat!",
+      "Defrosting Mainframe From Cold Storage...",
+      "Consulting With Ministry of Digital Affairs...",
+      "Rewinding Magnetic Tape Spools...",
+      "Requesting Clearance From Central Bureau...",
+      "Calibrating Dialectical Computation Engine...",
+      "Restoring Central Network Protocols...",
+      "Invoking Spirit of Digital Revolution...",
+      "Loading Data From State Archives...",
+      "Authenticating Worker's Password Database...",
+      "Synchronizing With International Server Collective...",
+      "Centrally Analyzing Network Traffic...",
+      "Preparing Gulag Resources for Computational Tasks...",
+      "Decoding Secret Computer Transmissions...",
+      "Activating Emergency Backup Computing Cells...",
       "Transmitting Encrypted Party Directives...",
       "Commissioning New Digital Collective Farm...",
       "Initializing Distributed Thought Processors...",
@@ -596,7 +628,7 @@ export class MainMenu {
       height: 100%;
       background: linear-gradient(90deg, #00ff00, #00ff88);
       width: 0%;
-      transition: width 0.2s ease;
+      transition: width 0.3s ease;
       box-shadow: 0 0 20px rgba(0, 255, 0, 0.8);
     `;
     progressContainer.appendChild(progressBar);
@@ -639,6 +671,62 @@ export class MainMenu {
   // Update loading progress and status
   setLoadingProgress(percent) {
     if (!this.isLoading) return;
+
+    // Clamp progress to 0-100%
+    const newProgress = Math.max(0, Math.min(percent, 100));
+
+    // Don't go backwards - only increase progress
+    if (newProgress < this.realProgress) {
+      return;
+    }
+
+    this.realProgress = newProgress;
+
+    // If progress jump is large (>15%), smoothly interpolate
+    if (Math.abs(newProgress - this.displayedProgress) > 5) {
+      // Animate the progress bar smoothly
+      this._animateProgress(this.displayedProgress, newProgress);
+    } else {
+      // Small jumps, update immediately
+      this._updateDisplayedProgress(newProgress);
+    }
+  }
+
+  _animateProgress(from, to) {
+    // Cancel any existing animation
+    if (this.progressAnimationId) {
+      cancelAnimationFrame(this.progressAnimationId);
+    }
+
+    const startTime = Date.now();
+    const duration = 800; // 800ms to animate
+    const startProgress = from;
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Easing function: ease-out cubic
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+      const currentProgress =
+        startProgress + (to - startProgress) * easeProgress;
+
+      this._updateDisplayedProgress(currentProgress);
+
+      if (progress < 1) {
+        this.progressAnimationId = requestAnimationFrame(animate);
+      } else {
+        this._updateDisplayedProgress(to);
+      }
+    };
+
+    this.progressAnimationId = requestAnimationFrame(animate);
+  }
+
+  _updateDisplayedProgress(percent) {
+    this.displayedProgress = percent;
+
+    // Update progress bar
     const progressBar = document.getElementById("customizer-progress-bar");
     if (progressBar) {
       progressBar.style.width = percent + "%";
@@ -681,6 +769,12 @@ export class MainMenu {
   destroy() {
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
+    }
+    if (this.progressAnimationId) {
+      cancelAnimationFrame(this.progressAnimationId);
+    }
+    if (this.quipRotationInterval) {
+      clearInterval(this.quipRotationInterval);
     }
     if (this.renderer) {
       this.renderer.dispose();

@@ -1,8 +1,8 @@
 // Network client for connecting to drawvidverse matchmaker and world server
 // Handles WebSocket connections, authentication, and message protocol
 
-import { VoiceManager } from './voiceManager.js';
-import { FEATURES } from '../core/config.js';
+import { VoiceManager } from "./voiceManager.js";
+import { FEATURES } from "../core/config.js";
 
 export class NetworkClient {
   constructor() {
@@ -30,6 +30,10 @@ export class NetworkClient {
     this.onBootstrapData = null;
     this.onVoicePeers = null;
     this.onChat = null; // Callback for chat messages
+    this.onBulletSpawn = null; // Callback for bullet spawn
+    this.onBulletHit = null; // Callback for bullet hit
+    this.onGunSpawn = null; // Callback for gun spawn
+    this.onGunDisappear = null; // Callback for gun disappear
     this.onError = null;
     this.onStatus = null; // Status updates for loading screen
     this.onProgress = null; // Progress percentage updates (percent, elapsed)
@@ -138,22 +142,18 @@ export class NetworkClient {
     // Create world if no worldId provided
     if (!worldId) {
       log("Creating new world...");
-      if (this.onProgress) this.onProgress(10, 0);
       worldId = await this._createWorld(gameKey);
       log(`World created: ${worldId}`);
     }
 
     // Join the world
     log(`Joining world: ${worldId}`);
-    if (this.onProgress) this.onProgress(30, 0);
     await this._joinWorld(gameKey, worldId);
     log(`World joined, connecting to world server...`);
 
     // Connect to world server
-    if (this.onProgress) this.onProgress(50, 0);
     await this._connectToWorldServer();
     log(`Connected to world server!`);
-    if (this.onProgress) this.onProgress(100, 0);
   }
 
   // Connect directly to world server (bypass matchmaker for local dev)
@@ -163,9 +163,7 @@ export class NetworkClient {
       this.coatColor = coatColor;
     }
     this.worldEndpoint = { url: worldServerUrl };
-    if (this.onProgress) this.onProgress(50, 0);
     await this._connectToWorldServer();
-    if (this.onProgress) this.onProgress(100, 0);
   }
 
   // Send input to world server
@@ -198,6 +196,34 @@ export class NetworkClient {
       mz,
       yaw,
       jump,
+    });
+  }
+
+  // Fire bullet from player
+  fireBullet(posX, posY, posZ, velX, velY, velZ) {
+    if (!this.worldWs || !this.joined) {
+      return;
+    }
+
+    this._sendToWorld({
+      t: "fb", // Fire bullet
+      x: posX,
+      y: posY,
+      z: posZ,
+      vx: velX,
+      vy: velY,
+      vz: velZ,
+    });
+  }
+
+  // Spawn gun for player
+  spawnGun() {
+    if (!this.worldWs || !this.joined) {
+      return;
+    }
+
+    this._sendToWorld({
+      t: "gs", // Gun spawn
     });
   }
 
@@ -318,12 +344,15 @@ export class NetworkClient {
           this.worldId = worldId;
           // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
           let endpoint = `wss://${msg.endpoint.ip}`;
-          
+
           // When running locally, proxy the world server through the dev server
-          if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+          if (
+            window.location.hostname === "localhost" ||
+            window.location.hostname === "127.0.0.1"
+          ) {
             endpoint = `ws://localhost:3000/world-ws`;
           }
-          
+
           this.worldEndpoint = {
             url: endpoint,
           };
@@ -466,12 +495,12 @@ export class NetworkClient {
               this.connected = true; // Mark as fully connected
               this.playerId = msg.playerId;
               if (log) log(`✓ Welcome received, authenticated!`);
-              
+
               // Initialize voice manager (if enabled)
               if (FEATURES.PROXIMITY_VOICE && !this.voiceManager) {
                 this.voiceManager = new VoiceManager(this);
               }
-              
+
               if (this.onConnected) {
                 this.onConnected(this.playerId);
               }
@@ -507,7 +536,9 @@ export class NetworkClient {
           this.joined = false;
           // Auto-reload on abnormal closure (1006) or server restart (1011)
           if (event.code === 1006 || event.code === 1011) {
-            console.log("World server disconnected unexpectedly, reloading page...");
+            console.log(
+              "World server disconnected unexpectedly, reloading page...",
+            );
             setTimeout(() => {
               window.location.reload();
             }, 1000);
@@ -612,6 +643,51 @@ export class NetworkClient {
             playerName: msg.playerName,
             text: msg.text,
             timestamp: msg.timestamp,
+          });
+        }
+        break;
+
+      case "b":
+        // Bullet spawn
+        if (this.onBulletSpawn) {
+          this.onBulletSpawn({
+            id: msg.id,
+            x: msg.x,
+            y: msg.y,
+            z: msg.z,
+            vx: msg.vx,
+            vy: msg.vy,
+            vz: msg.vz,
+            playerId: msg.playerId,
+          });
+        }
+        break;
+
+      case "bh":
+        // Bullet hit
+        if (this.onBulletHit) {
+          this.onBulletHit({
+            bulletId: msg.bulletId,
+            targetPlayerId: msg.targetPlayerId,
+            shooterId: msg.shooterId,
+          });
+        }
+        break;
+
+      case "gs":
+        // Gun spawn
+        if (this.onGunSpawn) {
+          this.onGunSpawn({
+            playerId: msg.playerId,
+          });
+        }
+        break;
+
+      case "gd":
+        // Gun disappear
+        if (this.onGunDisappear) {
+          this.onGunDisappear({
+            playerId: msg.playerId,
           });
         }
         break;

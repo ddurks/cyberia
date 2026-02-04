@@ -15,6 +15,10 @@ export class MultiplayerManager {
     this.loader = new GLTFLoader();
     this.loadingPlayers = new Set(); // Track players currently being loaded
     this.onServerState = null; // Callback for server reconciliation
+    this.bullets = new Map(); // bulletId -> { model, velocity, createdAt }
+    this.bulletModel = null; // Cached bullet model
+    this.gunModel = null; // Cached gun model
+    this.playerGuns = new Map(); // playerId -> { model, spawnTime }
   }
 
   setLocalPlayerId(playerId) {
@@ -172,6 +176,11 @@ export class MultiplayerManager {
     player.targetRotation = playerData.yaw;
     player.velocity.set(playerData.vx, playerData.vy, playerData.vz);
     player.grounded = playerData.grounded;
+
+    // Update gun position if player has an active gun
+    if (this.playerGuns.has(playerData.id)) {
+      this.updatePlayerGunPosition(playerData.id, player.model);
+    }
   }
 
   // Remove network player
@@ -349,5 +358,197 @@ export class MultiplayerManager {
       this._removeNetworkPlayer(playerId);
     }
     this.networkPlayers.clear();
+
+    // Clean up bullets
+    for (const [bulletId, bullet] of this.bullets) {
+      if (bullet.model && bullet.model.parent) {
+        this.scene.remove(bullet.model);
+      }
+    }
+    this.bullets.clear();
+  }
+
+  // Load bullet model
+  loadBulletModel() {
+    return new Promise((resolve) => {
+      if (this.bulletModel) {
+        resolve(this.bulletModel);
+      } else {
+        this.loader.load("./assets/bullet.glb", (gltf) => {
+          this.bulletModel = gltf.scene;
+          resolve(this.bulletModel);
+        });
+      }
+    });
+  }
+
+  // Load gun model
+  loadGunModel() {
+    return new Promise((resolve) => {
+      if (this.gunModel) {
+        resolve(this.gunModel);
+      } else {
+        this.loader.load("./assets/gun.glb", (gltf) => {
+          this.gunModel = gltf.scene;
+          resolve(this.gunModel);
+        });
+      }
+    });
+  }
+
+  // Spawn gun for a networked player when they fire
+  spawnGunForPlayer(playerId, playerModel) {
+    if (!this.gunModel || !playerModel) return;
+
+    // Remove old gun if it exists
+    if (this.playerGuns.has(playerId)) {
+      const oldGun = this.playerGuns.get(playerId);
+      this.scene.remove(oldGun.model);
+    }
+
+    // Clone gun model
+    const gun = this.gunModel.clone();
+    gun.scale.set(0.25, 0.25, 0.25);
+
+    // Position gun relative to player
+    const right = new THREE.Vector3(1, 0, 0);
+    const forward = new THREE.Vector3(0, 0, -1);
+    const up = new THREE.Vector3(0, 1, 0);
+
+    right.applyQuaternion(playerModel.quaternion);
+    forward.applyQuaternion(playerModel.quaternion);
+    up.applyQuaternion(playerModel.quaternion);
+
+    const gunPos = playerModel.position.clone();
+    gunPos.addScaledVector(right, -0.3);
+    gunPos.addScaledVector(forward, -0.5);
+    gunPos.addScaledVector(up, 0.4);
+
+    gun.position.copy(gunPos);
+
+    // Rotate gun to face forward
+    const quat = new THREE.Quaternion();
+    quat.setFromEuler(playerModel.rotation);
+    gun.quaternion.copy(quat);
+
+    this.scene.add(gun);
+
+    this.playerGuns.set(playerId, {
+      model: gun,
+      spawnTime: performance.now(),
+    });
+  }
+
+  // Update gun position for a networked player
+  updatePlayerGunPosition(playerId, playerModel) {
+    if (!this.playerGuns.has(playerId)) return;
+
+    const gunData = this.playerGuns.get(playerId);
+
+    // Position gun relative to player
+    const right = new THREE.Vector3(1, 0, 0);
+    const forward = new THREE.Vector3(0, 0, -1);
+    const up = new THREE.Vector3(0, 1, 0);
+
+    right.applyQuaternion(playerModel.quaternion);
+    forward.applyQuaternion(playerModel.quaternion);
+    up.applyQuaternion(playerModel.quaternion);
+
+    const gunPos = playerModel.position.clone();
+    gunPos.addScaledVector(right, -0.3);
+    gunPos.addScaledVector(forward, -0.5);
+    gunPos.addScaledVector(up, 0.4);
+
+    gunData.model.position.copy(gunPos);
+
+    // Rotate gun to face forward
+    const quat = new THREE.Quaternion();
+    quat.setFromEuler(playerModel.rotation);
+    gunData.model.quaternion.copy(quat);
+  }
+
+  // Update guns: remove expired ones
+  updatePlayerGuns(deltaT) {
+    const now = performance.now();
+    const gunTimeout = 10000; // 10 seconds
+
+    for (const [playerId, gunData] of this.playerGuns) {
+      const elapsed = now - gunData.spawnTime;
+      if (elapsed > gunTimeout) {
+        // Remove expired gun
+        this.scene.remove(gunData.model);
+        this.playerGuns.delete(playerId);
+      }
+    }
+  }
+
+  // Remove gun for a player
+  removePlayerGun(playerId) {
+    if (this.playerGuns.has(playerId)) {
+      const gunData = this.playerGuns.get(playerId);
+      this.scene.remove(gunData.model);
+      this.playerGuns.delete(playerId);
+    }
+  }
+  // Handle bullet hit event
+  handleBulletHit(bulletData) {
+    const { bulletId, targetPlayerId, hitPos } = bulletData;
+
+    // Remove bullet from tracking
+    if (this.bullets.has(bulletId)) {
+      const bullet = this.bullets.get(bulletId);
+      if (bullet.model && bullet.model.parent) {
+        this.scene.remove(bullet.model);
+      }
+      this.bullets.delete(bulletId);
+    }
+
+    // Visual effect could be added here (particle effect, etc)
+  }
+
+  // Create visual bullet on client (for remote player bullets)
+  spawnBullet(bulletId, posX, posY, posZ, velX, velY, velZ, playerId) {
+    if (!this.bulletModel) return;
+
+    const bullet = this.bulletModel.clone();
+    bullet.scale.set(0.25, 0.25, 0.25);
+    bullet.visible = true; // Ensure bullet is visible
+    bullet.position.set(posX, posY, posZ);
+
+    // Make bullet face the direction it's traveling
+    const velocity = new THREE.Vector3(velX, velY, velZ);
+    const targetPos = new THREE.Vector3(posX, posY, posZ).add(
+      velocity.clone().normalize(),
+    );
+    bullet.lookAt(targetPos);
+
+    this.scene.add(bullet);
+
+    this.bullets.set(bulletId, {
+      model: bullet,
+      position: new THREE.Vector3(posX, posY, posZ),
+      velocity: velocity,
+      createdAt: performance.now(),
+      playerId: playerId, // Track who fired the bullet
+    });
+  }
+
+  // Update bullet positions
+  updateBullets(deltaT) {
+    for (const [bulletId, bullet] of this.bullets) {
+      if (bullet.model) {
+        // Simple linear movement
+        bullet.position.addScaledVector(bullet.velocity, deltaT);
+        bullet.model.position.copy(bullet.position);
+
+        // Remove bullets that have traveled too far or exist too long
+        const age = (performance.now() - bullet.createdAt) / 1000;
+        if (age > 10) {
+          // 10 second lifespan
+          this.scene.remove(bullet.model);
+          this.bullets.delete(bulletId);
+        }
+      }
+    }
   }
 }

@@ -10,6 +10,9 @@ import { getNetworkConfig } from "./core/config.js";
 import { MainMenu } from "./ui/mainMenu.js";
 import { ChatUI } from "./ui/chatUI.js";
 import { ChatBubbleRenderer } from "./effects/chatBubbles.js";
+import { OffScreenIndicators } from "./ui/offScreenIndicators.js";
+import { MiniMap } from "./ui/minimap.js";
+import { GunSystem } from "./weapon/gunSystem.js";
 import {
   CharacterControls,
   footBoneNames,
@@ -25,6 +28,7 @@ import {
   D,
   SPACE,
   SHIFT,
+  B,
   DIRECTIONS,
   JOY_DIRS,
 } from "./core/constants.js";
@@ -46,8 +50,8 @@ document.body.classList.add(IS_MOBILE ? "mobile" : "desktop");
 
 // Performance settings based on device
 const PERFORMANCE_CONFIG = {
-  // Reduce update frequencies on mobile
-  footprintUpdateFreq: IS_MOBILE ? 20 : 10, // Only update footprints every N frames
+  // Footprints update frequently to be responsive
+  footprintUpdateFreq: 2, // Update every 2 frames for smooth footstep registration
   obstructableUpdateFreq: IS_MOBILE ? 20 : 10, // Only update terrain collision every N frames
   chatBubbleUpdateFreq: IS_MOBILE ? 5 : 2, // Less frequent bubble updates
 };
@@ -178,6 +182,71 @@ if (MULTIPLAYER_ENABLED) {
         const count = snapshot.p.length + 1;
         statusText.innerHTML = `online: <span class='count'>${count}</span>`;
       }
+    }
+  };
+
+  networkClient.onBulletSpawn = (bulletData) => {
+    if (multiplayerManager) {
+      // Load both bullet and gun models
+      Promise.all([
+        multiplayerManager.loadBulletModel(),
+        multiplayerManager.loadGunModel(),
+      ]).then(() => {
+        // Spawn the bullet
+        multiplayerManager.spawnBullet(
+          bulletData.id,
+          bulletData.x,
+          bulletData.y,
+          bulletData.z,
+          bulletData.vx,
+          bulletData.vy,
+          bulletData.vz,
+          bulletData.playerId,
+        );
+
+        // Spawn gun for the player who fired (if not local player)
+        if (
+          bulletData.playerId !== networkClient.playerId &&
+          multiplayerManager.networkPlayers.has(bulletData.playerId)
+        ) {
+          const playerData = multiplayerManager.networkPlayers.get(
+            bulletData.playerId,
+          );
+          multiplayerManager.spawnGunForPlayer(
+            bulletData.playerId,
+            playerData.model,
+          );
+        }
+      });
+    }
+  };
+
+  networkClient.onGunSpawn = (gunData) => {
+    if (multiplayerManager && gunData.playerId !== networkClient.playerId) {
+      // This is a networked player spawning a gun
+      multiplayerManager.loadGunModel().then(() => {
+        if (multiplayerManager.networkPlayers.has(gunData.playerId)) {
+          const playerData = multiplayerManager.networkPlayers.get(
+            gunData.playerId,
+          );
+          multiplayerManager.spawnGunForPlayer(
+            gunData.playerId,
+            playerData.model,
+          );
+        }
+      });
+    }
+  };
+
+  networkClient.onGunDisappear = (gunData) => {
+    if (multiplayerManager) {
+      multiplayerManager.removePlayerGun(gunData.playerId);
+    }
+  };
+
+  networkClient.onBulletHit = (hitData) => {
+    if (multiplayerManager) {
+      multiplayerManager.handleBulletHit(hitData);
     }
   };
 
@@ -491,6 +560,9 @@ const footprintSystem = new FootprintSystem(
 // Chat UI and bubble renderer
 let chatUI = null;
 let chatBubbleRenderer = null;
+let offScreenIndicators = null;
+let miniMap = null;
+let gunSystem = null;
 
 // Set footprint system reference for multiplayer
 if (multiplayerManager) {
@@ -545,6 +617,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   guy = gltf.scene.children[0];
   guy.userData.coatColor = randomCoatColor; // Store for later
   guy.position.set(0, 1, 0);
+  guy.rotation.y = 0; // Initialize rotation - face Z direction
   guy.scale.set(0.25, 0.25, 0.25);
   scene.add(guy);
   camera.position.add(guy.position);
@@ -615,6 +688,29 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   if (!chatBubbleRenderer) {
     chatBubbleRenderer = new ChatBubbleRenderer(scene, camera);
   }
+
+  // Initialize off-screen indicators and minimap
+  if (!offScreenIndicators && networkClient) {
+    offScreenIndicators = new OffScreenIndicators(
+      camera,
+      document.body,
+      networkClient.playerId,
+    );
+  }
+  if (!miniMap) {
+    miniMap = new MiniMap(document.body);
+    if (networkClient && networkClient.playerId) {
+      miniMap.setLocalPlayerId(networkClient.playerId);
+    }
+  }
+
+  // Initialize gun system
+  if (!gunSystem) {
+    gunSystem = new GunSystem(scene, gLoader);
+    gunSystem.loadAssets().then(() => {
+      // Gun system ready
+    });
+  }
 });
 
 // Initialize chat UI after all assets are loaded
@@ -646,6 +742,9 @@ const _upVector = new THREE.Vector3(0, 1, 0);
 // Input change detection (optimize network traffic)
 let _lastSentInput = { mx: 0, mz: 0, yaw: 0, jump: false };
 let _lastInputSendFrame = 0;
+
+// Gun system state
+let _gunBPressCount = 0; // Track B key presses for gun state
 
 // Network performance tracking
 let _msgSentCount = 0;
@@ -812,27 +911,90 @@ function animate() {
     if (frameCount % PERFORMANCE_CONFIG.obstructableUpdateFreq === 0) {
       level.updateActiveObstructables(characterControls.model.position);
     }
+
+    // Handle gun/weapon system (B key)
+    // State machine: Press 1 = spawn gun, Press 2 = shoot (and reset cooldown), Press 3 = shoot, etc.
+    // Gun auto-disappears after 10 seconds of no shooting
+    if (gunSystem && keysPressed[B]) {
+      _gunBPressCount++;
+
+      if (_gunBPressCount === 1) {
+        // First press: spawn gun
+        gunSystem.spawnGun(
+          guy,
+          guy.position,
+          characterControls.model.rotation.y,
+        );
+        // Tell server to broadcast gun spawn to other players
+        if (networkClient && networkClient.connected) {
+          networkClient.spawnGun();
+        }
+      } else if (_gunBPressCount >= 2) {
+        // Every other press (2nd, 3rd, 4th, etc): shoot
+        const bullet = gunSystem.shootBullet(
+          guy.position,
+          characterControls.model.rotation.y,
+          guy,
+        );
+        if (bullet && networkClient && networkClient.connected) {
+          // Send bullet to server
+          networkClient.fireBullet(
+            bullet.position.x,
+            bullet.position.y,
+            bullet.position.z,
+            bullet.velocity.x,
+            bullet.velocity.y,
+            bullet.velocity.z,
+          );
+        }
+        // Reset cooldown timer when shooting
+        gunSystem.resetCooldown();
+      }
+
+      keysPressed[B] = false; // Consume key press
+    } else if (gunSystem && gunSystem.gunSpawned && characterControls) {
+      // Update gun position while spawned
+      gunSystem.updateGunPosition(
+        guy,
+        guy.position,
+        characterControls.model.rotation.y,
+      );
+    }
+
+    // Update gun cooldown and auto-hide
+    if (gunSystem) {
+      gunSystem.update(deltaT);
+      // Reset B press counter when gun disappears
+      if (!gunSystem.gunSpawned && _gunBPressCount > 0) {
+        _gunBPressCount = 0;
+      }
+    }
   }
 
   // Update network players
   if (multiplayerManager) {
     multiplayerManager.update(deltaT);
+    multiplayerManager.updateBullets(deltaT);
+    multiplayerManager.updatePlayerGuns(deltaT);
   }
 
   orbitControls.update();
-  
+
   // Reduce wind updates on mobile
   if (frameCount % (IS_MOBILE ? 3 : 1) === 0) {
     wind.update();
   }
-  
+
   // Reduce footprint updates on mobile
   if (frameCount % PERFORMANCE_CONFIG.footprintUpdateFreq === 0) {
     footprintSystem.update(deltaT);
   }
 
   // Update chat bubbles with player positions (less frequently on mobile)
-  if (chatBubbleRenderer && frameCount % PERFORMANCE_CONFIG.chatBubbleUpdateFreq === 0) {
+  if (
+    chatBubbleRenderer &&
+    frameCount % PERFORMANCE_CONFIG.chatBubbleUpdateFreq === 0
+  ) {
     const playerPositions = new Map();
 
     // Add local player position
@@ -848,6 +1010,70 @@ function animate() {
     }
 
     chatBubbleRenderer.update(playerPositions);
+  }
+
+  // Update off-screen indicators (arrows pointing to off-screen players)
+  if (offScreenIndicators && guy && multiplayerManager && networkClient) {
+    const playersData = new Map();
+
+    // Only add remote players - never show arrow for local player
+    for (const [playerId, player] of multiplayerManager.networkPlayers) {
+      playersData.set(playerId, {
+        position: player.model.position,
+        color: player.coatColor || { r: 255, g: 255, b: 255 },
+        yaw: player.model.rotation.y,
+      });
+    }
+
+    offScreenIndicators.updatePlayers(playersData);
+    offScreenIndicators.update(guy.position);
+  }
+
+  // Update minimap (less frequently to reduce canvas redraw)
+  if (
+    miniMap &&
+    guy &&
+    multiplayerManager &&
+    networkClient &&
+    characterControls &&
+    body &&
+    frameCount % 2 === 0
+  ) {
+    const playersData = new Map();
+
+    // Add local player
+    if (networkClient.playerId) {
+      playersData.set(networkClient.playerId, {
+        position: guy.position,
+        color: randomCoatColor,
+        yaw: characterControls.model.rotation.y,
+      });
+    }
+
+    // Add remote players
+    for (const [playerId, player] of multiplayerManager.networkPlayers) {
+      playersData.set(playerId, {
+        position: player.model.position,
+        color: player.coatColor || { r: 255, g: 255, b: 255 },
+        yaw: player.model.rotation.y,
+      });
+    }
+
+    miniMap.updatePlayers(playersData);
+
+    // Update trees from the level
+    const trees = [];
+    if (level && level.spawnedTreeGroups) {
+      level.spawnedTreeGroups.forEach((treeGroup) => {
+        trees.push({
+          position: treeGroup.position,
+        });
+      });
+    }
+    miniMap.updateWorldObjects(trees);
+
+    // Update minimap
+    miniMap.update(guy.position);
   }
 
   level.updateSnowfall();
@@ -1085,5 +1311,14 @@ window.addEventListener("beforeunload", () => {
       networkClient.voiceManager.disconnect();
     }
     networkClient.disconnect();
+  }
+  if (offScreenIndicators) {
+    offScreenIndicators.destroy();
+  }
+  if (miniMap) {
+    miniMap.destroy();
+  }
+  if (gunSystem) {
+    gunSystem.destroy();
   }
 });
