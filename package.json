@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "dev:local": "VITE_ENV=local vite --host",
+    "dev:prod": "VITE_ENV=production vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },

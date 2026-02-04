@@ -42,8 +42,9 @@ export const NetworkConfig = {
   },
 };
 
-// Current environment
-export const CURRENT_ENV = "PRODUCTION";
+// Current environment - controlled by VITE_ENV variable or defaults to PRODUCTION
+const env = import.meta.env.VITE_ENV || "PRODUCTION";
+export const CURRENT_ENV = env === "local" ? "LOCAL_DIRECT" : "PRODUCTION";
 
 export function getNetworkConfig() {
   const config = NetworkConfig[CURRENT_ENV];
