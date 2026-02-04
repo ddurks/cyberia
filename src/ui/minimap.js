@@ -154,3 +154,4 @@ export class MiniMap {
   destroy() {
     this.canvas?.parentNode?.removeChild(this.canvas);
   }
+}
