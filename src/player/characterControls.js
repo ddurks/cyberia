@@ -33,6 +33,7 @@ export class CharacterControls {
     currentAction,
     level,
     isMobile,
+    keysPressed,
   ) {
     this.model = model;
     this.mixer = mixer;
@@ -42,6 +43,7 @@ export class CharacterControls {
     this.camera = camera;
     this.level = level;
     this.isMobile = isMobile;
+    this.keysPressed = keysPressed;
 
     if (isMobile) {
       this.setupMobileControls();
@@ -340,23 +342,30 @@ export class CharacterControls {
       const el = document.getElementById(`button-${key}`);
       this.buttons[key] = el;
 
+      // Map button to keyboard key: a->a, b->g (for gun)
+      const keyboardKey = key === "a" ? "a" : "g";
+
       el.addEventListener("touchstart", () => {
         el.src = `assets/hud/${baseName}_pressed.png`;
         this[`${key}Pressed`] = true;
+        this.keysPressed[keyboardKey] = true;
       });
 
       el.addEventListener("touchend", () => {
         el.src = `assets/hud/${baseName}.png`;
         this[`${key}Pressed`] = false;
+        this.keysPressed[keyboardKey] = false;
       });
 
       el.addEventListener("mousedown", () => {
         el.src = `assets/hud/${baseName}_pressed.png`;
         this[`${key}Pressed`] = true;
+        this.keysPressed[keyboardKey] = true;
       });
       el.addEventListener("mouseup", () => {
         el.src = `assets/hud/${baseName}.png`;
         this[`${key}Pressed`] = false;
+        this.keysPressed[keyboardKey] = false;
       });
     });
   }

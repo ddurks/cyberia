@@ -28,7 +28,7 @@ import {
   D,
   SPACE,
   SHIFT,
-  B,
+  G,
   DIRECTIONS,
   JOY_DIRS,
 } from "./core/constants.js";
@@ -672,6 +672,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
     "idle",
     level,
     IS_MOBILE,
+    keysPressed,
   );
 
   // Set reference for multiplayer after guy is loaded
@@ -912,10 +913,10 @@ function animate() {
       level.updateActiveObstructables(characterControls.model.position);
     }
 
-    // Handle gun/weapon system (B key)
+    // Handle gun/weapon system (G key)
     // State machine: Press 1 = spawn gun, Press 2 = shoot (and reset cooldown), Press 3 = shoot, etc.
     // Gun auto-disappears after 10 seconds of no shooting
-    if (gunSystem && keysPressed[B]) {
+    if (gunSystem && keysPressed[G]) {
       _gunBPressCount++;
 
       if (_gunBPressCount === 1) {
@@ -951,7 +952,7 @@ function animate() {
         gunSystem.resetCooldown();
       }
 
-      keysPressed[B] = false; // Consume key press
+      keysPressed[G] = false; // Consume key press
     } else if (gunSystem && gunSystem.gunSpawned && characterControls) {
       // Update gun position while spawned
       gunSystem.updateGunPosition(
