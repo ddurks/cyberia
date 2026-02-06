@@ -155,9 +155,14 @@ export class FootprintSystem {
   }
 
   update(delta = 0.016) {
+    // Fade footprints over time (life goes from 1 to 0)
+    // With delta ~ 0.016 (60fps) and updateFreq=2, we get ~0.032 between updates
+    // Multiplying by 2.0 makes footprints fade in ~4 seconds
+    const fadeRate = 2.0;
+    
     for (let i = this.footprints.length - 1; i >= 0; i--) {
       const fp = this.footprints[i];
-      fp.life -= delta * 0.25;
+      fp.life -= delta * fadeRate;
       fp.mesh.material.opacity = fp.life;
       fp.mesh.material.needsUpdate = true;
 

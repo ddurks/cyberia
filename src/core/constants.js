@@ -9,6 +9,7 @@ export const S = "s";
 export const D = "d";
 export const SHIFT = "shift";
 export const SPACE = " ";
+export const G = "g"; // Gun key
 export const DIRECTIONS = [W, A, S, D];
 
 // Joystick directions

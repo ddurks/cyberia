@@ -33,6 +33,7 @@ export class CharacterControls {
     currentAction,
     level,
     isMobile,
+    keysPressed,
   ) {
     this.model = model;
     this.mixer = mixer;
@@ -42,6 +43,7 @@ export class CharacterControls {
     this.camera = camera;
     this.level = level;
     this.isMobile = isMobile;
+    this.keysPressed = keysPressed;
 
     if (isMobile) {
       this.setupMobileControls();
@@ -51,7 +53,7 @@ export class CharacterControls {
     this.skeleton = this.skinnedMesh ? this.skinnedMesh.skeleton : null;
   }
 
-  update(delta, keysPressed, body, raycaster, downVector) {
+  update(delta, keysPressed, body, raycaster, downVector, isDancing = false) {
     const directionPressed = DIRECTIONS.some(
       (key) => keysPressed[key] === true,
     );
@@ -77,7 +79,9 @@ export class CharacterControls {
     }
 
     let play = this.currentAction;
-    if (this.isStartingJump) {
+    if (isDancing) {
+      play = "dance";
+    } else if (this.isStartingJump) {
       play = "jump";
     } else if (directionPressed || joystickPressed) {
       if (this.isJumping) {
@@ -94,15 +98,32 @@ export class CharacterControls {
       play = "idle";
     }
 
+    const danceCallback =
+      isDancing && play === "dance"
+        ? () => {
+            // Dance animation completed once, increment counter
+            if (window.danceLoops !== undefined) {
+              window.danceLoops++;
+              if (window.danceLoops >= 3) {
+                // Stop dancing after 3 loops
+                if (window.stopDance) {
+                  window.stopDance();
+                }
+              }
+            }
+          }
+        : undefined;
+
     this.updateAnim(
       play,
       delta,
-      this.isStartingJump
-        ? () => {
-            this.isStartingJump = false;
-            // isJumping is already set, will be cleared when landing
-          }
-        : undefined,
+      danceCallback ||
+        (this.isStartingJump
+          ? () => {
+              this.isStartingJump = false;
+              // isJumping is already set, will be cleared when landing
+            }
+          : undefined),
     );
     if (this.level.planeMeshes) {
       this.adjustHeightFromTerrain(body, raycaster, downVector);
@@ -340,23 +361,30 @@ export class CharacterControls {
       const el = document.getElementById(`button-${key}`);
       this.buttons[key] = el;
 
+      // Map button to keyboard key: a->a, b->g (for gun)
+      const keyboardKey = key === "a" ? "a" : "g";
+
       el.addEventListener("touchstart", () => {
         el.src = `assets/hud/${baseName}_pressed.png`;
         this[`${key}Pressed`] = true;
+        this.keysPressed[keyboardKey] = true;
       });
 
       el.addEventListener("touchend", () => {
         el.src = `assets/hud/${baseName}.png`;
         this[`${key}Pressed`] = false;
+        this.keysPressed[keyboardKey] = false;
       });
 
       el.addEventListener("mousedown", () => {
         el.src = `assets/hud/${baseName}_pressed.png`;
         this[`${key}Pressed`] = true;
+        this.keysPressed[keyboardKey] = true;
       });
       el.addEventListener("mouseup", () => {
         el.src = `assets/hud/${baseName}.png`;
         this[`${key}Pressed`] = false;
+        this.keysPressed[keyboardKey] = false;
       });
     });
   }
