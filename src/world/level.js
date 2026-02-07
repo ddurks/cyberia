@@ -754,4 +754,18 @@ export class Level {
 
     return new THREE.CanvasTexture(canvas);
   }
+
+  // Debug: hide all trees
+  hideAllTrees() {
+    for (const group of this.spawnedTreeGroups) {
+      group.mesh.visible = false;
+    }
+  }
+
+  // Debug: show all trees
+  showAllTrees() {
+    for (const group of this.spawnedTreeGroups) {
+      group.mesh.visible = true;
+    }
+  }
 }

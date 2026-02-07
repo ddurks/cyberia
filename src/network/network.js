@@ -34,6 +34,7 @@ export class NetworkClient {
     this.onBulletHit = null; // Callback for bullet hit
     this.onGunSpawn = null; // Callback for gun spawn
     this.onGunDisappear = null; // Callback for gun disappear
+    this.onVideoSync = null; // Callback for synced video timestamp
     this.onError = null;
     this.onStatus = null; // Status updates for loading screen
     this.onProgress = null; // Progress percentage updates (percent, elapsed)
@@ -545,15 +546,11 @@ export class NetworkClient {
           clearTimeout(connectionTimeout);
           this.authenticated = false;
           this.joined = false;
-          // Auto-reload on abnormal closure (1006) or server restart (1011)
-          if (event.code === 1006 || event.code === 1011) {
-            console.log(
-              "World server disconnected unexpectedly, reloading page...",
-            );
-            setTimeout(() => {
-              window.location.reload();
-            }, 1000);
-          }
+          this.connected = false; // Mark as disconnected
+          // Gracefully fall back to offline mode instead of reloading
+          console.log(
+            `World server disconnected (code ${event.code}). Falling back to offline mode.`,
+          );
         };
       } catch (error) {
         clearTimeout(connectionTimeout);
@@ -644,6 +641,13 @@ export class NetworkClient {
 
       case "pong":
         // Ping response
+        break;
+
+      case "videoSync":
+        // Synced video timestamp from server
+        if (this.onVideoSync) {
+          this.onVideoSync(msg.timestamp);
+        }
         break;
 
       case "chat":

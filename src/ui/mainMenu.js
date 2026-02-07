@@ -96,23 +96,35 @@ export class MainMenu {
           position: fixed;
           background: #3a3a3a;
           justify-content: center;
-          align-items: center;
+          align-items: flex-start;
+          padding-top: 20px;
         }
 
         #main-menu-content {
           display: flex;
           flex-direction: column;
-          gap: 30px;
+          gap: 5px;
           width: 33.333%;
           max-width: 350px;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
+          overflow: visible;
+          max-height: none;
+          padding: 10px 0 0 0;
+          flex-shrink: 1;
+          min-height: 0;
+        }
+        
+        #main-menu-content > div:not(:first-child) {
+          flex-shrink: 1;
+          min-height: 0;
         }
 
         #model-preview {
-          width: 280px;
-          height: 251px;
-          flex-shrink: 0;
+          width: 100%;
+          max-width: 280px;
+          aspect-ratio: 280/251;
+          flex-shrink: 1;
           background: white;
           position: relative;
           overflow: hidden;
@@ -145,18 +157,20 @@ export class MainMenu {
           }
 
           #main-menu-content {
-            gap: 20px;
+            gap: 5px;
             flex-direction: column;
             align-items: center;
             justify-content: flex-start;
             width: 100%;
+            overflow: visible;
+            padding-bottom: 10px;
           }
 
           #model-preview {
             width: 90vw;
             max-width: 350px;
-            height: auto;
             aspect-ratio: 280/251;
+            flex-shrink: 1;
           }
 
           #color-picker-grid {
@@ -213,10 +227,12 @@ export class MainMenu {
     contentWrapper.style.cssText = `
       display: flex;
       flex-direction: column;
-      gap: 15px;
+      gap: 5px;
       align-items: center;
-      justify-content: center;
-      width: 320px;
+      justify-content: flex-start;
+      width: 100%;
+      max-width: 350px;
+      min-width: 0;
     `;
     this.contentWrapper = contentWrapper;
 
@@ -224,10 +240,11 @@ export class MainMenu {
     const previewContainer = document.createElement("div");
     previewContainer.id = "model-preview";
     previewContainer.style.cssText = `
-      width: 280px;
-      height: 251px;
+      width: 100%;
+      max-width: 280px;
+      aspect-ratio: 280/251;
       background: white;
-      flex-shrink: 0;
+      flex-shrink: 1;
       position: relative;
       overflow: visible;
     `;

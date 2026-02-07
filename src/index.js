@@ -13,6 +13,8 @@ import { ChatBubbleRenderer } from "./effects/chatBubbles.js";
 import { OffScreenIndicators } from "./ui/offScreenIndicators.js";
 import { MiniMap } from "./ui/minimap.js";
 import { GunSystem } from "./weapon/gunSystem.js";
+import { ComputerScreen } from "./world/computerScreen.js";
+import { CyberMouse } from "./world/cyberMouse.js";
 import {
   CharacterControls,
   footBoneNames,
@@ -21,6 +23,8 @@ import { Level } from "./world/level.js";
 import { SnowPuffSystem } from "./effects/snowPuffs.js";
 import { FootprintSystem } from "./effects/footprints.js";
 import { WindSystem } from "./effects/wind.js";
+import { NetworkDebug } from "./utils/networkDebug.js";
+import { PhysicsDebug } from "./utils/physicsDebug.js";
 import {
   W,
   A,
@@ -82,6 +86,7 @@ document.addEventListener(
 // Handle tap on own player to trigger dance
 let isDancing = false;
 let danceLoops = 0;
+let isPlayerFrozen = false;
 
 function startDance() {
   isDancing = true;
@@ -102,11 +107,13 @@ document.addEventListener(
     if (!guy || !characterControls || !animationsMap.has("dance")) return;
 
     // Prevent triggering if joystick is being used
-    if (characterControls.joystick && 
-        (characterControls.joystick.forward > 0 || 
-         characterControls.joystick.backward > 0 ||
-         characterControls.joystick.left > 0 ||
-         characterControls.joystick.right > 0)) {
+    if (
+      characterControls.joystick &&
+      (characterControls.joystick.forward > 0 ||
+        characterControls.joystick.backward > 0 ||
+        characterControls.joystick.left > 0 ||
+        characterControls.joystick.right > 0)
+    ) {
       return;
     }
 
@@ -180,10 +187,18 @@ let randomCoatColor = {
 
 let playerName = "cyberian";
 
+// Initialize physics debug
+let physicsDebug = null;
+
 // Initialize multiplayer
 if (MULTIPLAYER_ENABLED) {
+  // Create physics debug instance (camera will be set up later)
+  physicsDebug = new PhysicsDebug(scene, null);
+  window.physicsDebug.instance = physicsDebug;
+  
   // guy and footprintSystem are not defined yet, will be set later
   multiplayerManager = new MultiplayerManager(scene, null, null);
+  multiplayerManager.physicsDebug = physicsDebug;
   networkClient = new NetworkClient();
   worldGenerator = new WorldGenerator(Date.now());
 
@@ -239,6 +254,11 @@ if (MULTIPLAYER_ENABLED) {
     const statusText = document.getElementById("status-text");
     if (statusText)
       statusText.innerHTML = "online: <span class='count'>1</span>";
+    
+    // Request video sync now that network is connected
+    if (computerScreen) {
+      computerScreen.requestVideoSync();
+    }
   };
 
   networkClient.onSnapshot = (snapshot) => {
@@ -258,6 +278,12 @@ if (MULTIPLAYER_ENABLED) {
         const count = snapshot.p.length + 1;
         statusText.innerHTML = `online: <span class='count'>${count}</span>`;
       }
+    }
+  };
+
+  networkClient.onVideoSync = (timestamp) => {
+    if (computerScreen) {
+      computerScreen.syncVideoToServer(timestamp);
     }
   };
 
@@ -323,6 +349,41 @@ if (MULTIPLAYER_ENABLED) {
   networkClient.onBulletHit = (hitData) => {
     if (multiplayerManager) {
       multiplayerManager.handleBulletHit(hitData);
+    }
+
+    // If local player was hit, freeze them and play rip animation
+    if (hitData.targetPlayerId === networkClient.playerId && characterControls && mixer) {
+      const ripAction = animationsMap.get("rip");
+      if (ripAction) {
+        // Stop all other animations
+        animationsMap.forEach((action) => {
+          action.stop();
+        });
+
+        // Play rip once and clamp on last frame
+        ripAction.reset();
+        ripAction.clampWhenFinished = true;
+        ripAction.loop = THREE.LoopOnce;
+        ripAction.play();
+
+        // Freeze the player (stop sending movement input)
+        isPlayerFrozen = true;
+
+        // After 5 seconds, return to normal
+        setTimeout(() => {
+          if (!isPlayerFrozen) return; // Safety check
+
+          ripAction.stop();
+          isPlayerFrozen = false;
+
+          // Return to idle
+          const idleAction = animationsMap.get("idle");
+          if (idleAction) {
+            idleAction.reset();
+            idleAction.play();
+          }
+        }, 5000);
+      }
     }
   };
 
@@ -645,6 +706,8 @@ let chatBubbleRenderer = null;
 let offScreenIndicators = null;
 let miniMap = null;
 let gunSystem = null;
+let computerScreen = null;
+let cyberMouse = null;
 
 // Set footprint system reference for multiplayer
 if (multiplayerManager) {
@@ -724,6 +787,11 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   body.linearDamping = 0.999;
   world.addBody(body);
 
+  // Add local player physics sphere to debug (0.35 radius)
+  if (physicsDebug) {
+    physicsDebug.addSphere("local_player", body.position, 0.35, 0x00ff00);
+  }
+
   gltf.animations.forEach((clip) => {
     clip.tracks = clip.tracks.filter((track) => {
       // Only keep tracks that are not rotating foot/toe bones
@@ -797,6 +865,36 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
       // Gun system ready
     });
   }
+
+  // Initialize computer screen
+  if (!computerScreen) {
+    computerScreen = new ComputerScreen(scene, camera, gLoader, networkClient);
+    computerScreen.loadAssets().then(() => {
+      // Spawn computer at fixed location in the world
+      computerScreen.spawn(new THREE.Vector3(0, 0, -50));
+      // Auto-play video
+      computerScreen.play();
+    });
+  }
+
+  // Initialize cyber mouse
+  if (!cyberMouse) {
+    cyberMouse = new CyberMouse(scene, gLoader, world, raycaster, level?.planeMeshes || []);
+
+    if (multiplayerManager) {
+      multiplayerManager.registerCyberMouse("cybermouse1", cyberMouse);
+    }
+
+    cyberMouse.loadAssets().then(() => {
+      const spawnDistance = 5;
+      const spawnAngle = Math.random() * Math.PI * 2;
+      const spawnX = guy.position.x + Math.cos(spawnAngle) * spawnDistance;
+      const spawnZ = guy.position.z + Math.sin(spawnAngle) * spawnDistance;
+      const spawnY = 50;
+
+      cyberMouse.spawn(new THREE.Vector3(spawnX, spawnY, spawnZ));
+    });
+  }
 });
 
 // Initialize chat UI after all assets are loaded
@@ -861,7 +959,14 @@ function animate() {
     }
 
     // Apply movement BEFORE physics step (matches server)
-    characterControls.update(deltaT, keysPressed, body, raycaster, downVector, isDancing);
+    characterControls.update(
+      deltaT,
+      keysPressed,
+      body,
+      raycaster,
+      downVector,
+      isDancing,
+    );
 
     // Update tree collisions BEFORE physics step so bodies exist during collision detection
     level.updateTreeCollisions(
@@ -873,6 +978,11 @@ function animate() {
 
   // Use variable timestep for smooth physics at any framerate
   world.step(deltaT);
+
+  // Update physics debug for local player
+  if (physicsDebug && physicsDebug.enabled && body) {
+    physicsDebug.updateSphere("local_player", body.position);
+  }
 
   // Apply custom terrain collision (matches server physics)
   // Only constrains Y, preserves XZ collision responses from tree bodies
@@ -1003,7 +1113,8 @@ function animate() {
         keysPressed[SPACE] || characterControls.aPressed || false;
 
       // Send input every other frame (30Hz) to match server tick rate
-      if (frameCount % 2 === 0) {
+      // Don't send input if player is frozen from bullet hit
+      if (frameCount % 2 === 0 && !isPlayerFrozen) {
         networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
         _msgSentCount++;
       }
@@ -1070,6 +1181,16 @@ function animate() {
         _gunBPressCount = 0;
       }
     }
+
+    // Update computer screen video
+    if (computerScreen) {
+      computerScreen.update(deltaT);
+    }
+
+    // Update cyber mouse mob (local update)
+    if (cyberMouse) {
+      cyberMouse.update(deltaT);
+    }
   }
 
   // Update network players
@@ -1077,6 +1198,8 @@ function animate() {
     multiplayerManager.update(deltaT);
     multiplayerManager.updateBullets(deltaT);
     multiplayerManager.updatePlayerGuns(deltaT);
+    // Update networked mobs
+    multiplayerManager.updateMobs(deltaT);
   }
 
   orbitControls.update();
@@ -1172,6 +1295,11 @@ function animate() {
       });
     }
     miniMap.updateWorldObjects(trees);
+
+    // Update cybermouse position on minimap
+    if (cyberMouse && cyberMouse.position) {
+      miniMap.setCyberMousePosition(cyberMouse.position);
+    }
 
     // Update minimap
     miniMap.update(guy.position);
@@ -1423,3 +1551,35 @@ window.addEventListener("beforeunload", () => {
     gunSystem.destroy();
   }
 });
+
+// Debug helpers
+window.debug = {
+  hideTrees: () => level && level.hideAllTrees(),
+  showTrees: () => level && level.showAllTrees(),
+  mousePos: () =>
+    cyberMouse
+      ? `Cyber mouse at (${cyberMouse.position.x.toFixed(2)}, ${cyberMouse.position.y.toFixed(2)}, ${cyberMouse.position.z.toFixed(2)}) | Body: ${!!cyberMouse.body} | Visible: ${cyberMouse.model?.visible}`
+      : "No mouse",
+  mouseInfo: () => {
+    if (cyberMouse) {
+      console.table({
+        position: `(${cyberMouse.position.x.toFixed(2)}, ${cyberMouse.position.y.toFixed(2)}, ${cyberMouse.position.z.toFixed(2)})`,
+        visible: cyberMouse.model?.visible,
+        inScene: scene.children.includes(cyberMouse.model),
+        animation: cyberMouse.currentAnimation,
+        moving: cyberMouse.isMoving,
+      });
+    }
+  },
+};
+
+// Network debugging
+window.network = {
+  debug: NetworkDebug,
+  enable: () => NetworkDebug.enable(),
+  disable: () => NetworkDebug.disable(),
+  status: () => NetworkDebug.getStatus(),
+  lastMobs: () => NetworkDebug.lastSnapshotMobs,
+  lastPlayers: () => NetworkDebug.lastSnapshotPlayers,
+  mobs: () => multiplayerManager?.mobs,
+};

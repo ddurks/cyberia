@@ -3,6 +3,9 @@
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { LerpSystem } from "../utils/lerpSystem.js";
+import { NetworkDebug } from "../utils/networkDebug.js";
+import { PhysicsDebug } from "../utils/physicsDebug.js";
 
 export class MultiplayerManager {
   constructor(scene, localCharacter, footprintSystem) {
@@ -19,15 +22,22 @@ export class MultiplayerManager {
     this.bulletModel = null; // Cached bullet model
     this.gunModel = null; // Cached gun model
     this.playerGuns = new Map(); // playerId -> { model, spawnTime }
+    this.mobs = new Map(); // mobId -> mob entity
+    this.physicsDebug = null; // Physics debug helper
   }
 
   setLocalPlayerId(playerId) {
     this.localPlayerId = playerId;
+    // Initialize physics debug if not already done
+    if (!this.physicsDebug) {
+      this.physicsDebug = new PhysicsDebug(this.scene, null);
+      window.physicsDebug.instance = this.physicsDebug;
+    }
   }
 
   // Handle snapshot from server
   handleSnapshot(snapshot) {
-    if (!snapshot || !snapshot.p) return;
+    if (!snapshot) return;
 
     // Handle local player state from server (server sends it in 'you' field)
     if (snapshot.you && snapshot.you.id === this.localPlayerId) {
@@ -36,41 +46,57 @@ export class MultiplayerManager {
       }
     }
 
-    // Update ALL other players from server
-    const currentPlayerIds = new Set();
+    // Update other players from server
+    if (snapshot.p) {
+      const currentPlayerIds = new Set();
 
-    for (const playerData of snapshot.p) {
-      currentPlayerIds.add(playerData.id);
+      for (const playerData of snapshot.p) {
+        currentPlayerIds.add(playerData.id);
 
-      if (
-        !this.networkPlayers.has(playerData.id) &&
-        !this.loadingPlayers.has(playerData.id)
-      ) {
-        this._createNetworkPlayer(playerData);
-      } else if (this.networkPlayers.has(playerData.id)) {
-        this._updateNetworkPlayer(playerData);
+        if (
+          !this.networkPlayers.has(playerData.id) &&
+          !this.loadingPlayers.has(playerData.id)
+        ) {
+          this._createNetworkPlayer(playerData);
+        } else if (this.networkPlayers.has(playerData.id)) {
+          this._updateNetworkPlayer(playerData);
+        }
+      }
+
+      // Remove disconnected players
+      for (const [playerId, player] of this.networkPlayers) {
+        if (!currentPlayerIds.has(playerId)) {
+          this._removeNetworkPlayer(playerId);
+        }
       }
     }
 
-    // Remove disconnected players
-    for (const [playerId, player] of this.networkPlayers) {
-      if (!currentPlayerIds.has(playerId)) {
-        this._removeNetworkPlayer(playerId);
+    // Update mobs from server
+    if (snapshot.m) {
+      const currentMobIds = new Set();
+
+      for (const mobData of snapshot.m) {
+        currentMobIds.add(mobData.id);
+
+        const existingMob = this.mobs.get(mobData.id);
+        if (existingMob && existingMob.updateFromNetwork) {
+          // Update existing mob
+          existingMob.updateFromNetwork(mobData);
+        }
+      }
+
+      // Remove mobs that no longer exist on server
+      for (const [mobId, mob] of this.mobs) {
+        if (!currentMobIds.has(mobId) && mob.destroy) {
+          mob.destroy();
+          this.mobs.delete(mobId);
+        }
       }
     }
   }
 
   // Create new network player
   _createNetworkPlayer(playerData) {
-    console.log(
-      "➕ Adding network player:",
-      playerData.id,
-      "at",
-      playerData.x,
-      playerData.y,
-      playerData.z,
-    );
-
     // Mark as loading to prevent duplicates
     this.loadingPlayers.add(playerData.id);
 
@@ -161,6 +187,12 @@ export class MultiplayerManager {
         nameTag,
       });
 
+      // Add physics debug sphere (0.35 radius = collision sphere)
+      if (this.physicsDebug && this.physicsDebug.enabled) {
+        const pos = new THREE.Vector3(playerData.x, playerData.y, playerData.z);
+        this.physicsDebug.addSphere(`player_${playerData.id}`, pos, 0.35, 0xff0000);
+      }
+
       // Done loading
       this.loadingPlayers.delete(playerData.id);
     });
@@ -177,6 +209,14 @@ export class MultiplayerManager {
     player.velocity.set(playerData.vx, playerData.vy, playerData.vz);
     player.grounded = playerData.grounded;
 
+    // Update physics debug sphere position
+    if (this.physicsDebug && this.physicsDebug.enabled) {
+      this.physicsDebug.updateSphere(
+        `player_${playerData.id}`,
+        new THREE.Vector3(playerData.x, playerData.y, playerData.z)
+      );
+    }
+
     // Update gun position if player has an active gun
     if (this.playerGuns.has(playerData.id)) {
       this.updatePlayerGunPosition(playerData.id, player.model);
@@ -185,13 +225,14 @@ export class MultiplayerManager {
 
   // Remove network player
   _removeNetworkPlayer(playerId) {
-    // Removing network player
-
     const player = this.networkPlayers.get(playerId);
     if (player) {
       this.scene.remove(player.model);
       if (player.nameTag) {
         this.scene.remove(player.nameTag);
+      }
+      if (this.physicsDebug) {
+        this.physicsDebug.removeSphere(`player_${playerId}`);
       }
       this.networkPlayers.delete(playerId);
     }
@@ -201,6 +242,15 @@ export class MultiplayerManager {
   update(delta) {
     for (const [playerId, player] of this.networkPlayers) {
       if (!player.model) continue;
+
+      // Skip position updates for frozen players (bullet hit animation)
+      if (player.isFrozen) {
+        // Still update animations though
+        if (player.mixer) {
+          player.mixer.update(delta);
+        }
+        continue;
+      }
 
       // Calculate speed from velocity
       const speed = Math.sqrt(
@@ -223,7 +273,7 @@ export class MultiplayerManager {
       // Optimize: Skip interpolation for stationary players who are already at target
       if (!isStationary || distanceToTarget > 0.1) {
         // Only interpolate if moving OR if there's significant position error
-        const lerpFactor = 0.15; // Gentle interpolation for smoothness
+        const lerpFactor = LerpSystem.PRESETS.SMOOTH; // 0.15
         player.model.position.x +=
           (player.targetPosition.x - player.model.position.x) * lerpFactor;
         player.model.position.y +=
@@ -366,6 +416,45 @@ export class MultiplayerManager {
       }
     }
     this.bullets.clear();
+
+    // Clean up mobs
+    for (const [mobId, mob] of this.mobs) {
+      if (mob && mob.destroy) {
+        mob.destroy();
+      }
+    }
+    this.mobs.clear();
+  }
+
+  // Register cyber mouse entity
+  registerCyberMouse(mouseId, mouseEntity) {
+    this.mobs.set(mouseId, mouseEntity);
+  }
+
+  // Update cyber mouse from network state
+  updateCyberMouseFromNetwork(mouseId, data) {
+    const mouse = this.mobs.get(mouseId);
+    if (mouse?.updateFromNetwork) {
+      mouse.updateFromNetwork(data);
+    }
+  }
+
+  // Get cyber mouse state for network transmission
+  getCyberMouseState(mouseId) {
+    const mouse = this.mobs.get(mouseId);
+    if (mouse?.getState) {
+      return mouse.getState();
+    }
+    return null;
+  }
+
+  // Update all mobs
+  updateMobs(deltaT) {
+    for (const [mobId, mob] of this.mobs) {
+      if (mob?.update) {
+        mob.update(deltaT);
+      }
+    }
   }
 
   // Load bullet model
@@ -503,11 +592,47 @@ export class MultiplayerManager {
       this.bullets.delete(bulletId);
     }
 
-    // Visual effect could be added here (particle effect, etc)
+    // Play rip animation on hit player
+    const player = this.networkPlayers.get(targetPlayerId);
+    if (player && player.mixer && player.animationsMap) {
+      const ripAction = player.animationsMap.get("rip");
+      if (ripAction) {
+        // Stop all other animations
+        player.animationsMap.forEach((action) => {
+          action.stop();
+        });
+
+        // Play rip once and clamp on last frame
+        ripAction.reset();
+        ripAction.clampWhenFinished = true;
+        ripAction.loop = THREE.LoopOnce;
+        ripAction.play();
+
+        // Mark player as frozen (stop updating their position from server)
+        player.isFrozen = true;
+        player.frozenUntilTime = Date.now() + 5000;
+
+        // After 5 seconds, unfreeze and return to idle
+        setTimeout(() => {
+          if (!player.isFrozen) return; // Safety check
+
+          ripAction.stop();
+          player.isFrozen = false;
+
+          // Return to idle
+          const idleAction = player.animationsMap.get("idle");
+          if (idleAction) {
+            idleAction.reset();
+            idleAction.play();
+            player.currentAnimation = "idle";
+          }
+        }, 5000);
+      }
+    }
   }
 
   playDanceAnimation(playerId) {
-    const player = this.players.get(playerId);
+    const player = this.networkPlayers.get(playerId);
     if (!player || !player.mixer) return;
 
     const danceAction = player.animationsMap?.get("dance");

@@ -57,6 +57,10 @@ export class MiniMap {
     this.worldObjects.trees = trees || [];
   }
 
+  setCyberMousePosition(position) {
+    this.worldObjects.cyberMouse = position;
+  }
+
   update(localPlayerPos) {
     if (!this.ctx) return;
     this._draw(localPlayerPos);
@@ -81,6 +85,11 @@ export class MiniMap {
     this.ctx.fill();
 
     this._drawTrees(localPlayerPos);
+    
+    // Cyber mouse
+    if (this.worldObjects.cyberMouse) {
+      this._drawCyberMouse(this.worldObjects.cyberMouse, localPlayerPos);
+    }
     
     // Other players
     this.players.forEach((player, playerId) => {
@@ -126,6 +135,21 @@ export class MiniMap {
     this.ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
     this.ctx.lineWidth = 1;
     this.ctx.stroke();
+  }
+
+  _drawCyberMouse(cyberMousePos, localPlayerPos) {
+    if (!cyberMousePos) return;
+
+    const pos = this._worldToScreen(cyberMousePos, localPlayerPos);
+    if (!this._isOnScreen(pos.x, pos.y)) return;
+
+    // Draw cyber mouse as a magenta square
+    this.ctx.fillStyle = "rgba(255, 0, 255, 0.9)";
+    this.ctx.fillRect(pos.x - 4, pos.y - 4, 8, 8);
+
+    this.ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(pos.x - 4, pos.y - 4, 8, 8);
   }
 
   _worldToScreen(worldPos, localPlayerPos) {
