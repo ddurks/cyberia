@@ -1002,60 +1002,65 @@ function animate() {
   }
 
   if (characterControls) {
-    // Server reconciliation happens AFTER physics step to not be overwritten
-    // But apply it BEFORE updating visual position to avoid feedback loops
+    // Gentle server reconciliation to handle physics drift
+    // At 20Hz snapshots (50ms apart), we need very soft corrections to avoid jitter
+    // Only correct when absolutely necessary, and blend very gently
     if (serverTarget && networkClient && networkClient.connected) {
       const timeSinceUpdate = performance.now() - serverTarget.timestamp;
 
-      // Only use server reconciliation if updates are recent (< 500ms)
-      // Otherwise fall back to pure client prediction
+      // Only use recent updates
       if (timeSinceUpdate < 500) {
         const targetX = serverTarget.x;
         const targetY = serverTarget.y;
         const targetZ = serverTarget.z;
 
-        // Calculate errors
+        // Calculate horizontal error
         const xzError = Math.sqrt(
           Math.pow(targetX - body.position.x, 2) +
             Math.pow(targetZ - body.position.z, 2),
         );
         const yError = Math.abs(targetY - body.position.y);
 
-        // Don't reconcile if player is actively moving - trust client prediction
-        // Only reconcile when idle or when error is huge (>2 units = major desync)
-        const isActivelyMoving =
-          Math.sqrt(
-            body.velocity.x * body.velocity.x +
-              body.velocity.z * body.velocity.z,
-          ) > 1.0;
-        const isMajorDesync = xzError > 2.0;
+        // Check if player is actively moving with significant velocity
+        const horizontalSpeed = Math.sqrt(
+          body.velocity.x * body.velocity.x +
+            body.velocity.z * body.velocity.z,
+        );
+        const isActivelyMoving = horizontalSpeed > 5.0; // Only correct when nearly stopped
 
-        if (!isActivelyMoving || isMajorDesync) {
-          // Use a blend factor based on how recent the update is
-          // Decay over 100ms since snapshots arrive every ~33ms at 30Hz
-          const updateFreshness = Math.max(0, 1 - timeSinceUpdate / 100);
-          const blendFactor = 0.1 * updateFreshness; // Reduced from 0.2 to avoid fighting
+        // Only correct if idle OR if drift is huge (>1 unit = major desync)
+        const isMajorDesync = xzError > 1.0;
+        const shouldCorrect = !isActivelyMoving || isMajorDesync;
 
-          // Only reconcile XZ if error is significant enough to avoid micro-jitter
-          // Dead zone: ignore errors under 0.05 units
-          if (xzError > 0.05) {
+        if (shouldCorrect) {
+          // VERY gentle blend factor for 20Hz updates
+          // At 20Hz, corrections happen every 50ms, so we need tiny steps
+          // Major desync gets slightly more correction, idle gets more
+          let blendFactor = 0.02; // Default: very gentle for active movement with major desync
+          
+          if (!isActivelyMoving) {
+            // Player is idle: correct more aggressively since there's no local input
+            blendFactor = 0.15;
+          }
+
+          // Apply horizontal correction only if error is above dead zone (0.1 units)
+          if (xzError > 0.1) {
             body.position.x += (targetX - body.position.x) * blendFactor;
             body.position.z += (targetZ - body.position.z) * blendFactor;
           }
 
-          // Only blend Y when actually jumping/falling - never when grounded
-          // This prevents ground jitter from terrain collision differences
+          // Y-axis: Only correct if airborne (falling/jumping) to handle gravity differences
+          // This prevents ground friction differences from causing drift
           const isActuallyAirborne =
             characterControls.isJumping && Math.abs(body.velocity.y) > 1.0;
 
           if (isActuallyAirborne && yError > 0.5) {
-            body.position.y += (targetY - body.position.y) * blendFactor * 0.3; // Very gentle Y blend
+            // Very gentle Y correction since gravity is different on server
+            body.position.y += (targetY - body.position.y) * blendFactor * 0.2;
           }
         }
       }
-      // else: Server updates too old, trust client physics completely
     }
-    // else: No server connection, trust client physics completely
 
     // Update visual position from physics body
     guy.position.copy(body.position);
@@ -1112,9 +1117,9 @@ function animate() {
       const jumpPressed =
         keysPressed[SPACE] || characterControls.aPressed || false;
 
-      // Send input every other frame (30Hz) to match server tick rate
+      // Send input at 20Hz to match server tick rate (every 3 frames at 60fps)
       // Don't send input if player is frozen from bullet hit
-      if (frameCount % 2 === 0 && !isPlayerFrozen) {
+      if (frameCount % 3 === 0 && !isPlayerFrozen) {
         networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
         _msgSentCount++;
       }
