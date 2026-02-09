@@ -6,6 +6,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { LerpSystem } from "../utils/lerpSystem.js";
 import { NetworkDebug } from "../utils/networkDebug.js";
 import { PhysicsDebug } from "../utils/physicsDebug.js";
+import { PlayerGun } from "../player/playerGun.js";
 
 export class MultiplayerManager {
   constructor(scene, localCharacter, footprintSystem) {
@@ -190,7 +191,12 @@ export class MultiplayerManager {
       // Add physics debug sphere (0.35 radius = collision sphere)
       if (this.physicsDebug && this.physicsDebug.enabled) {
         const pos = new THREE.Vector3(playerData.x, playerData.y, playerData.z);
-        this.physicsDebug.addSphere(`player_${playerData.id}`, pos, 0.35, 0xff0000);
+        this.physicsDebug.addSphere(
+          `player_${playerData.id}`,
+          pos,
+          0.35,
+          0xff0000,
+        );
       }
 
       // Done loading
@@ -213,7 +219,7 @@ export class MultiplayerManager {
     if (this.physicsDebug && this.physicsDebug.enabled) {
       this.physicsDebug.updateSphere(
         `player_${playerData.id}`,
-        new THREE.Vector3(playerData.x, playerData.y, playerData.z)
+        new THREE.Vector3(playerData.x, playerData.y, playerData.z),
       );
     }
 
@@ -479,6 +485,7 @@ export class MultiplayerManager {
       } else {
         this.loader.load("./assets/gun.glb", (gltf) => {
           this.gunModel = gltf.scene;
+          this.gunAnimations = gltf.animations || [];
           resolve(this.gunModel);
         });
       }
@@ -488,85 +495,32 @@ export class MultiplayerManager {
   // Spawn gun for a networked player when they fire
   spawnGunForPlayer(playerId, playerModel) {
     if (!this.gunModel || !playerModel) return;
+    if (this.playerGuns.has(playerId)) return; // Don't respawn if exists
 
-    // Remove old gun if it exists
-    if (this.playerGuns.has(playerId)) {
-      const oldGun = this.playerGuns.get(playerId);
-      this.scene.remove(oldGun.model);
-    }
-
-    // Clone gun model
-    const gun = this.gunModel.clone();
-    gun.scale.set(0.25, 0.25, 0.25);
-
-    // Position gun relative to player
-    const right = new THREE.Vector3(1, 0, 0);
-    const forward = new THREE.Vector3(0, 0, -1);
-    const up = new THREE.Vector3(0, 1, 0);
-
-    right.applyQuaternion(playerModel.quaternion);
-    forward.applyQuaternion(playerModel.quaternion);
-    up.applyQuaternion(playerModel.quaternion);
-
-    const gunPos = playerModel.position.clone();
-    gunPos.addScaledVector(right, -0.3);
-    gunPos.addScaledVector(forward, -0.5);
-    gunPos.addScaledVector(up, 0.4);
-
-    gun.position.copy(gunPos);
-
-    // Rotate gun to face forward
-    const quat = new THREE.Quaternion();
-    quat.setFromEuler(playerModel.rotation);
-    gun.quaternion.copy(quat);
-
-    this.scene.add(gun);
-
-    this.playerGuns.set(playerId, {
-      model: gun,
-      spawnTime: performance.now(),
-    });
+    const playerGun = new PlayerGun(
+      this.gunModel,
+      this.gunAnimations,
+      this.scene,
+    );
+    playerGun.spawn(playerModel);
+    this.playerGuns.set(playerId, playerGun);
   }
 
   // Update gun position for a networked player
   updatePlayerGunPosition(playerId, playerModel) {
     if (!this.playerGuns.has(playerId)) return;
-
     const gunData = this.playerGuns.get(playerId);
-
-    // Position gun relative to player
-    const right = new THREE.Vector3(1, 0, 0);
-    const forward = new THREE.Vector3(0, 0, -1);
-    const up = new THREE.Vector3(0, 1, 0);
-
-    right.applyQuaternion(playerModel.quaternion);
-    forward.applyQuaternion(playerModel.quaternion);
-    up.applyQuaternion(playerModel.quaternion);
-
-    const gunPos = playerModel.position.clone();
-    gunPos.addScaledVector(right, -0.3);
-    gunPos.addScaledVector(forward, -0.5);
-    gunPos.addScaledVector(up, 0.4);
-
-    gunData.model.position.copy(gunPos);
-
-    // Rotate gun to face forward
-    const quat = new THREE.Quaternion();
-    quat.setFromEuler(playerModel.rotation);
-    gunData.model.quaternion.copy(quat);
+    gunData.updatePosition(playerModel);
   }
 
   // Update guns: remove expired ones
   updatePlayerGuns(deltaT) {
-    const now = performance.now();
-    const gunTimeout = 10000; // 10 seconds
-
     for (const [playerId, gunData] of this.playerGuns) {
-      const elapsed = now - gunData.spawnTime;
-      if (elapsed > gunTimeout) {
-        // Remove expired gun
-        this.scene.remove(gunData.model);
+      if (gunData.isExpired()) {
+        gunData.destroy();
         this.playerGuns.delete(playerId);
+      } else {
+        gunData.update(deltaT);
       }
     }
   }
@@ -575,7 +529,7 @@ export class MultiplayerManager {
   removePlayerGun(playerId) {
     if (this.playerGuns.has(playerId)) {
       const gunData = this.playerGuns.get(playerId);
-      this.scene.remove(gunData.model);
+      gunData.destroy();
       this.playerGuns.delete(playerId);
     }
   }
@@ -638,34 +592,38 @@ export class MultiplayerManager {
     const danceAction = player.animationsMap?.get("dance");
     if (!danceAction) return;
 
-    // Play dance 3 times
-    let loopCount = 0;
     danceAction.reset();
-    danceAction.clampWhenFinished = false;
+    danceAction.setLoop(THREE.LoopRepeat, 3);
+    danceAction.clampWhenFinished = true;
 
     const onDanceFinish = () => {
-      loopCount++;
-      if (loopCount < 3) {
-        danceAction.reset();
-        danceAction.play();
-      } else {
-        // Return to idle after 3 loops
-        const idleAction = player.animationsMap?.get("idle");
-        if (idleAction) {
-          danceAction.stop();
-          idleAction.play();
-        }
-        player.mixer.removeEventListener("finished", onDanceFinish);
+      const idleAction = player.animationsMap?.get("idle");
+      if (idleAction) {
+        idleAction.reset();
+        idleAction.play();
       }
+      player.mixer.removeEventListener("finished", onDanceFinish);
     };
 
     player.mixer.addEventListener("finished", onDanceFinish);
     danceAction.play();
   }
 
+  // Trigger shoot animation for networked player's gun
+  playGunShootAnimation(playerId) {
+    if (!this.playerGuns.has(playerId)) return;
+    const gunData = this.playerGuns.get(playerId);
+    gunData.playShoot();
+  }
+
   // Create visual bullet on client (for remote player bullets)
   spawnBullet(bulletId, posX, posY, posZ, velX, velY, velZ, playerId) {
     if (!this.bulletModel) return;
+
+    // Trigger shoot animation for the player who fired
+    if (playerId) {
+      this.playGunShootAnimation(playerId);
+    }
 
     const bullet = this.bulletModel.clone();
     bullet.scale.set(0.25, 0.25, 0.25);

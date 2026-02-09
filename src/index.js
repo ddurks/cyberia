@@ -101,6 +101,9 @@ function stopDance() {
   danceLoops = 0;
 }
 
+// Handle tap/click on own player to trigger dance
+let lastDanceToggleTime = 0;
+
 document.addEventListener(
   "touchend",
   (event) => {
@@ -117,27 +120,40 @@ document.addEventListener(
       return;
     }
 
-    const touch = event.changedTouches[0];
+    const touch = event.touches[0] || event.changedTouches[0];
+    if (!touch) return;
+
     const raycaster = new THREE.Raycaster();
+
+    // Use canvas rect to get correct coordinates for canvas-constrained viewports
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
     const mouse = new THREE.Vector2(
-      (touch.clientX / window.innerWidth) * 2 - 1,
-      -(touch.clientY / window.innerHeight) * 2 + 1,
+      (x / rect.width) * 2 - 1,
+      -(y / rect.height) * 2 + 1,
     );
     raycaster.setFromCamera(mouse, camera);
 
     const intersects = raycaster.intersectObject(guy, true);
+
     if (intersects.length > 0) {
-      if (isDancing) {
-        stopDance();
-      } else {
-        startDance();
+      const now = performance.now();
+      if (now - lastDanceToggleTime > 200) {
+        lastDanceToggleTime = now;
+        event.preventDefault();
+        if (isDancing) {
+          stopDance();
+        } else {
+          startDance();
+        }
       }
     }
   },
   false,
 );
 
-// Handle click on own player (desktop) to trigger dance
 document.addEventListener(
   "click",
   (event) => {
@@ -152,10 +168,15 @@ document.addEventListener(
 
     const intersects = raycaster.intersectObject(guy, true);
     if (intersects.length > 0) {
-      if (isDancing) {
-        stopDance();
-      } else {
-        startDance();
+      const now = performance.now();
+      if (now - lastDanceToggleTime > 200) {
+        lastDanceToggleTime = now;
+        event.stopPropagation();
+        if (isDancing) {
+          stopDance();
+        } else {
+          startDance();
+        }
       }
     }
   },
@@ -195,7 +216,7 @@ if (MULTIPLAYER_ENABLED) {
   // Create physics debug instance (camera will be set up later)
   physicsDebug = new PhysicsDebug(scene, null);
   window.physicsDebug.instance = physicsDebug;
-  
+
   // guy and footprintSystem are not defined yet, will be set later
   multiplayerManager = new MultiplayerManager(scene, null, null);
   multiplayerManager.physicsDebug = physicsDebug;
@@ -254,7 +275,7 @@ if (MULTIPLAYER_ENABLED) {
     const statusText = document.getElementById("status-text");
     if (statusText)
       statusText.innerHTML = "online: <span class='count'>1</span>";
-    
+
     // Request video sync now that network is connected
     if (computerScreen) {
       computerScreen.requestVideoSync();
@@ -352,7 +373,11 @@ if (MULTIPLAYER_ENABLED) {
     }
 
     // If local player was hit, freeze them and play rip animation
-    if (hitData.targetPlayerId === networkClient.playerId && characterControls && mixer) {
+    if (
+      hitData.targetPlayerId === networkClient.playerId &&
+      characterControls &&
+      mixer
+    ) {
       const ripAction = animationsMap.get("rip");
       if (ripAction) {
         // Stop all other animations
@@ -812,7 +837,7 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
   });
   animationsMap.get("jump").setLoop(THREE.LoopOnce);
   if (animationsMap.has("dance")) {
-    animationsMap.get("dance").setLoop(THREE.LoopOnce);
+    animationsMap.get("dance").setLoop(THREE.LoopRepeat, 3);
   }
   animationsMap.get("idle").fadeIn(5).play();
 
@@ -879,7 +904,13 @@ gLoader.load("./assets/cyberian.glb", (gltf) => {
 
   // Initialize cyber mouse
   if (!cyberMouse) {
-    cyberMouse = new CyberMouse(scene, gLoader, world, raycaster, level?.planeMeshes || []);
+    cyberMouse = new CyberMouse(
+      scene,
+      gLoader,
+      world,
+      raycaster,
+      level?.planeMeshes || [],
+    );
 
     if (multiplayerManager) {
       multiplayerManager.registerCyberMouse("cybermouse1", cyberMouse);
@@ -1023,8 +1054,7 @@ function animate() {
 
         // Check if player is actively moving with significant velocity
         const horizontalSpeed = Math.sqrt(
-          body.velocity.x * body.velocity.x +
-            body.velocity.z * body.velocity.z,
+          body.velocity.x * body.velocity.x + body.velocity.z * body.velocity.z,
         );
         const isActivelyMoving = horizontalSpeed > 5.0; // Only correct when nearly stopped
 
@@ -1037,7 +1067,7 @@ function animate() {
           // At 20Hz, corrections happen every 50ms, so we need tiny steps
           // Major desync gets slightly more correction, idle gets more
           let blendFactor = 0.02; // Default: very gentle for active movement with major desync
-          
+
           if (!isActivelyMoving) {
             // Player is idle: correct more aggressively since there's no local input
             blendFactor = 0.15;

@@ -101,15 +101,9 @@ export class CharacterControls {
     const danceCallback =
       isDancing && play === "dance"
         ? () => {
-            // Dance animation completed once, increment counter
-            if (window.danceLoops !== undefined) {
-              window.danceLoops++;
-              if (window.danceLoops >= 3) {
-                // Stop dancing after 3 loops
-                if (window.stopDance) {
-                  window.stopDance();
-                }
-              }
+            // Dance animation completed, stop dancing
+            if (window.stopDance) {
+              window.stopDance();
             }
           }
         : undefined;
