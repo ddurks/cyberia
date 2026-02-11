@@ -43,7 +43,7 @@ export default defineConfig({
         },
       },
       "/world-ws": {
-        target: "wss://world.drawvid.com",
+        target: "wss://cyberia-world.drawvid.com",
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/world-ws/, ""),

@@ -27,17 +27,15 @@ export const NetworkConfig = {
         return `ws://${manualIP}:7777`;
       }
 
-      // Use Vite proxy to work around iOS Safari WebSocket bug
-      // This allows WebSocket connections from the same origin
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      return `${protocol}//${window.location.host}/ws`;
+      // Connect directly to world server on port 7777
+      return `ws://localhost:7777`;
     },
     mode: "direct",
   },
 
   // Production (AWS deployment with matchmaker)
   PRODUCTION: {
-    matchmakerUrl: "wss://matchmaker.drawvid.com/",
+    matchmakerUrl: "wss://matchmaker.drawvid.com",
     mode: "matchmaker",
   },
 };

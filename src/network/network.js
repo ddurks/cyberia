@@ -158,8 +158,14 @@ export class NetworkClient {
   }
 
   // Connect directly to world server (bypass matchmaker for local dev)
-  async connectDirectly(worldServerUrl, token, coatColor) {
+  async connectDirectly(
+    worldServerUrl,
+    token,
+    coatColor,
+    worldId = "test-world",
+  ) {
     this.token = token;
+    this.worldId = worldId;
     if (coatColor) {
       this.coatColor = coatColor;
     }
