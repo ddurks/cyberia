@@ -628,6 +628,23 @@ export class MainMenu {
     `;
     gifContainer.appendChild(loadingGif);
 
+    // Add stage name and description (above progress bar)
+    const stageInfo = document.createElement("div");
+    stageInfo.id = "customizer-stage-info";
+    stageInfo.style.cssText = `
+      width: 280px;
+      text-align: center;
+      color: #00ff88;
+      font-size: 14px;
+      font-family: monospace;
+      font-weight: bold;
+      min-height: 40px;
+      line-height: 1.4;
+      text-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+    `;
+    stageInfo.textContent = "Initializing...";
+    gifContainer.appendChild(stageInfo);
+
     // Add progress bar
     const progressContainer = document.createElement("div");
     progressContainer.style.cssText = `
@@ -651,7 +668,7 @@ export class MainMenu {
     progressContainer.appendChild(progressBar);
     gifContainer.appendChild(progressContainer);
 
-    // Add status text
+    // Add status text (below progress bar)
     const statusText = document.createElement("div");
     statusText.id = "customizer-status-text";
     statusText.style.cssText = `
@@ -774,6 +791,23 @@ export class MainMenu {
         }
       }, 3000);
     }, 1000);
+  }
+
+  // Set detailed progress with stage information
+  setDetailedProgress(progressData) {
+    if (!this.isLoading) return;
+
+    // Update stage info
+    const stageInfo = document.getElementById("customizer-stage-info");
+    if (stageInfo) {
+      stageInfo.innerHTML = `
+        <div style="font-size: 15px; margin-bottom: 2px;">${progressData.stageName}</div>
+        <div style="font-size: 11px; color: #00dd77; font-weight: normal; text-shadow: 0 0 8px rgba(0, 221, 119, 0.5);">${progressData.stageDescription}</div>
+      `;
+    }
+
+    // Update progress bar
+    this.setLoadingProgress(progressData.progress);
   }
 
   // Hide customizer

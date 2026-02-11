@@ -38,6 +38,7 @@ export class NetworkClient {
     this.onError = null;
     this.onStatus = null; // Status updates for loading screen
     this.onProgress = null; // Progress percentage updates (percent, elapsed)
+    this.onProgressDetailed = null; // Detailed progress updates with stage info
 
     this.inputSeq = 0;
     this.lastSentInput = null;
@@ -346,11 +347,27 @@ export class NetworkClient {
 
       const handler = (msg) => {
         if (msg.t === "status") {
-          // Real-time progress updates from server startup
+          // Real-time progress updates from server startup (legacy format)
           if (this.onStatus) {
             this.onStatus(msg.msg);
           }
           // Callback for progress updates
+          if (this.onProgress) {
+            this.onProgress(msg.progress, msg.elapsed);
+          }
+        } else if (msg.t === "progress") {
+          // New detailed progress format with stage information
+          if (this.onProgressDetailed) {
+            this.onProgressDetailed({
+              stage: msg.stage,
+              stageName: msg.stageName,
+              stageDescription: msg.stageDescription,
+              progress: msg.progress,
+              elapsed: msg.elapsed,
+              details: msg.details,
+            });
+          }
+          // Also send simplified progress callback for compatibility
           if (this.onProgress) {
             this.onProgress(msg.progress, msg.elapsed);
           }

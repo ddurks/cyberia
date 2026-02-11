@@ -237,6 +237,13 @@ if (MULTIPLAYER_ENABLED) {
     }
   };
 
+  // Detailed progress callback - stage information from server
+  networkClient.onProgressDetailed = (progressData) => {
+    if (mainMenu && mainMenu.isLoading) {
+      mainMenu.setDetailedProgress(progressData);
+    }
+  };
+
   // Chat message callback - display chat bubbles above players
   networkClient.onChat = (chatMsg) => {
     // Find the player to display chat above them
