@@ -12,6 +12,7 @@ export class NetworkClient {
     this.token = null;
     this.worldEndpoint = null;
     this.worldId = null; // Store worldId for bootstrap upload
+    this.gameKey = "cyberia"; // Store gameKey for world server connection
     this.authenticated = false;
     this.joined = false;
     this.connected = false; // Master connection flag
@@ -131,6 +132,7 @@ export class NetworkClient {
       );
 
     log(`Starting with gameKey: ${gameKey}`);
+    this.gameKey = gameKey; // Store gameKey for world server connection
 
     if (!this.matchmakerWs || this.matchmakerWs.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected to matchmaker");
@@ -374,34 +376,42 @@ export class NetworkClient {
         } else if (msg.t === "joinResult") {
           if (this.onStatus)
             this.onStatus("Entry Visa Granted! Preparing Transport...");
-          this.matchmakerWs.removeEventListener("message", handler);
+          this.matchmakerWs.removeEventListener("message", messageHandler);
           // Store worldId for later use in bootstrap upload
           this.worldId = worldId;
-          // Use WSS with domain name through NLB (omit port 443 as it's the default for wss://)
-          let endpoint = `wss://${msg.endpoint.ip}`;
 
           // When running locally, proxy the world server through the dev server
           if (
             window.location.hostname === "localhost" ||
             window.location.hostname === "127.0.0.1"
           ) {
-            endpoint = `ws://localhost:3000/world-ws`;
+            this.worldEndpoint = {
+              url: `ws://localhost:3000/world-ws`,
+              isDomainEndpoint: false,
+            };
+          } else {
+            // Use the actual endpoint from the matchmaker (via API Gateway with HTTPS)
+            const isDomainEndpoint = msg.endpoint.ip.includes('.') && !msg.endpoint.ip.match(/^\d+\.\d+\.\d+\.\d+$/);
+            this.worldEndpoint = {
+              url: `wss://${msg.endpoint.ip}:${msg.endpoint.port}`,
+              isDomainEndpoint, // true for world.drawvid.com, false for bare IPs like 3.15.44.23
+            };
           }
-
-          this.worldEndpoint = {
-            url: endpoint,
-          };
           this.token = msg.token;
           resolve();
         } else if (msg.t === "err") {
-          this.matchmakerWs.removeEventListener("message", handler);
+          this.matchmakerWs.removeEventListener("message", messageHandler);
           reject(new Error(msg.msg));
         }
       };
-      this.matchmakerWs.addEventListener("message", (e) => {
+      
+      // Store the bound message handler so we can properly remove it later
+      const messageHandler = (e) => {
         const parsed = JSON.parse(e.data);
         handler(parsed);
-      });
+      };
+      
+      this.matchmakerWs.addEventListener("message", messageHandler);
 
       this._sendToMatchmaker({
         t: "joinWorld",
@@ -469,6 +479,7 @@ export class NetworkClient {
                 try {
                   this._sendToWorld({
                     t: "auth",
+                    gameKey: this.gameKey, // Send gameKey to Lambda for task routing
                     token: this.token,
                   });
 
@@ -497,15 +508,12 @@ export class NetworkClient {
         // Attach ALL event handlers immediately, before any async operations
         this.worldWs.onopen = () => {
           clearInterval(readyStatePoller);
-          // Authenticate
           try {
             this._sendToWorld({
               t: "auth",
+              gameKey: this.gameKey,
               token: this.token,
             });
-
-            // Immediately send join after auth
-            // (server will queue it until auth completes)
             this._sendToWorld({
               t: "join",
               name: this.playerName,
@@ -521,6 +529,66 @@ export class NetworkClient {
         this.worldWs.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+            
+            // Handle heartbeat messages from task launcher
+            if (msg.t === "taskLaunching") {
+              if (log) log(`Task launching...`);
+              if (this.onStatus) {
+                this.onStatus(msg.message || "Task launching...");
+              }
+              return; // Don't pass to normal message handler
+            }
+            
+            if (msg.t === "taskStarting") {
+              if (log) log(`${msg.message} (${Math.round(msg.progress || 0)}%)`);
+              if (this.onStatus) {
+                this.onStatus(msg.message || "Task starting...");
+              }
+              if (this.onProgress) {
+                this.onProgress(msg.progress || 0, Math.round((Date.now() - startTime) / 1000));
+              }
+              return; // Don't pass to normal message handler
+            }
+            
+            if (msg.t === "taskReady") {
+              // If using domain endpoint (API Gateway proxy), keep the connection open
+              // Lambda handler proxies messages, no need for direct connection
+              if (this.worldEndpoint?.isDomainEndpoint) {
+                if (log) log(`Task ready (proxied via API Gateway), staying on current connection`);
+                return; // Don't switch connections
+              }
+
+              if (log) log(`Task ready! IP: ${msg.taskIP}:${msg.taskPort}, switching to direct connection...`);
+              if (this.onStatus) {
+                this.onStatus("Connecting to world server...");
+              }
+              
+              // MUST cleanup pollers before closing connection
+              clearInterval(readyStatePoller);
+              
+              // Close the API Gateway connection
+              const oldWs = this.worldWs;
+              this.worldWs = null;
+              if (oldWs) {
+                oldWs.close(1000, 'Switching to direct connection');
+              }
+              
+              // Connect directly to the task's public IP
+              const taskUrl = `wss://${msg.taskIP}:${msg.taskPort}`;
+              if (log) log(`[DEBUG] Connecting directly to task at ${taskUrl}`);
+              
+              this._connectDirectlyToTask(
+                taskUrl,
+                connectionTimeout,
+                log,
+                startTime,
+                isIOS,
+                resolve,
+                reject
+              );
+              return; // Don't pass to normal message handler
+            }
+
             this._handleWorldMessage(msg);
 
             if (msg.t === "welcome") {
@@ -597,6 +665,97 @@ export class NetworkClient {
     }
   }
 
+  async _connectDirectlyToTask(
+    taskUrl,
+    connectionTimeout,
+    log,
+    startTime,
+    isIOS,
+    resolve,
+    reject
+  ) {
+    try {
+      log(`[DEBUG] Creating WebSocket with URL: ${taskUrl}`);
+      this.worldWs = new WebSocket(taskUrl);
+      this.worldWs.binaryType = "arraybuffer";
+
+      this.worldWs.onopen = () => {
+        // Connected directly to task - send auth+join
+        try {
+          this._sendToWorld({
+            t: "auth",
+            gameKey: this.gameKey,
+            token: this.token,
+          });
+
+          this._sendToWorld({
+            t: "join",
+            name: this.playerName,
+            coatColor: this.coatColor,
+          });
+        } catch (error) {
+          console.error("❌ Direct connection error:", error);
+          clearTimeout(connectionTimeout);
+          reject(error);
+        }
+      };
+
+      this.worldWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          this._handleWorldMessage(msg);
+
+          if (msg.t === "welcome") {
+            clearTimeout(connectionTimeout);
+            this.authenticated = true;
+            this.joined = true;
+            this.connected = true;
+            this.playerId = msg.playerId;
+            if (log) log(`✓ Welcome received from direct connection!`);
+
+            // Initialize voice manager (if enabled)
+            if (FEATURES.PROXIMITY_VOICE && !this.voiceManager) {
+              this.voiceManager = new VoiceManager(this);
+            }
+
+            if (this.onConnected) {
+              this.onConnected(this.playerId);
+            }
+            resolve();
+          }
+        } catch (error) {
+          console.error("❌ Error processing direct message:", error, event.data);
+        }
+      };
+
+      this.worldWs.onerror = (error) => {
+        console.error("❌ Direct connection error:", error);
+        clearTimeout(connectionTimeout);
+        reject(
+          new Error(
+            `Direct world server connection failed: ${
+              error && error.message ? error.message : JSON.stringify(error)
+            }`
+          )
+        );
+      };
+
+      this.worldWs.onclose = (event) => {
+        if (log) log(`Direct connection closed: code=${event.code}`);
+        if (event.code === 1006 || event.code === 1011) {
+          if (log) log("Unexpected disconnect from direct connection, reloading...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      };
+    } catch (error) {
+      console.error("❌ Failed to create direct connection:", error);
+      clearTimeout(connectionTimeout);
+      reject(error);
+    }
+  }
+
   _handleWorldMessage(msg) {
     // Skip logging noisy messages
     if (msg.t !== "voicePeers" && msg.t !== "s") {
@@ -604,6 +763,11 @@ export class NetworkClient {
     }
 
     switch (msg.t) {
+      case "ack":
+        // Acknowledge message received
+        console.log("[Network] Acknowledged:", msg.originalType);
+        break;
+
       case "welcome":
         // Welcome already handled in onmessage for connection flow
         break;

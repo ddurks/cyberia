@@ -33,10 +33,10 @@ export const NetworkConfig = {
     mode: "direct",
   },
 
-  // Production (AWS deployment with matchmaker)
+  // Production (direct connection to Lightsail)
   PRODUCTION: {
-    matchmakerUrl: "wss://matchmaker.drawvid.com",
-    mode: "matchmaker",
+    worldServerUrl: "wss://world-cyberia.drawvid.com",
+    mode: "direct",
   },
 };
 

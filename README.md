@@ -2,48 +2,39 @@
 
 # Cyberia
 
-## Quick Start
+3D multiplayer browser game. Live at [cyberia.drawvid.com](https://cyberia.drawvid.com).
 
-### Install dependencies
+## Quick Start
 
 ```bash
 npm install
+npm run dev:local   # connects to ws://localhost:7777
 ```
 
-### Local Development
-
-Run with local world server (backend):
+The worldserver must be running separately. From the `drawvidverse` repo:
 
 ```bash
-npm run dev:local
+npm run dev:cyberia --workspace=packages/drawvid-worldserver
 ```
 
-Connects to: `ws://localhost:7777`
+## Scripts
 
-Run with production backend:
+- `npm run dev:local` — Vite dev server, connects to `ws://localhost:7777`
+- `npm run dev:prod` — Vite dev server, connects to `wss://world-cyberia.drawvid.com`
+- `npm run build` — Production Vite build to `dist/`
+
+## Deploy
 
 ```bash
-npm run dev:prod
+./deploy.sh
 ```
 
-Connects to: `wss://matchmaker.drawvid.com/`
+Builds with Vite, uploads to S3 (`cyberia-drawvid-frontend-593615615124`), invalidates CloudFront (`EJDZHTYPQ4BNP`).
 
-### Start Both Frontend & Backend Together
+## Architecture
 
-From the drawvidverse root:
-
-```bash
-npm run dev:all
-```
-
-## Build
-
-```bash
-npm run build
-```
-
-## Development Modes
-
-- **dev:local** - Connect to local world server (ws://localhost:7777)
-- **dev:prod** - Connect to production backend (wss://matchmaker.drawvid.com/)
-- **dev** - Same as dev:prod
+- **Framework**: Phaser 3 + Three.js (3D rendering)
+- **Bundler**: Vite
+- **Frontend CDN**: CloudFront → cyberia.drawvid.com
+- **World server**: wss://world-cyberia.drawvid.com (nginx → PM2 on Lightsail, port 7777)
+- **Auth**: Open access — no JWT required

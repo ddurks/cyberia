@@ -12,7 +12,7 @@ set -e
 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 BUCKET_NAME="cyberia-drawvid-frontend-$AWS_ACCOUNT_ID"
-CLOUDFRONT_DIST_ID="E2CCOO5NN3Z8QV"  # cyberia.drawvid.com distribution
+CLOUDFRONT_DIST_ID="EJDZHTYPQ4BNP"  # cyberia.drawvid.com distribution
 SKIP_INVALIDATE="${1:---invalidate}"
 
 echo "================================"
