@@ -121,7 +121,7 @@ npm run dev:local   # connects to ws://localhost:7777
 
 The worldserver must be running separately (from drawvidverse repo):
 ```bash
-npm run dev:cyberia --workspace=packages/drawvid-worldserver
+npm run dev:cyberia --workspace=worldserver
 ```
 
 ### Deploy
