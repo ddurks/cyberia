@@ -965,6 +965,11 @@ const _upVector = new THREE.Vector3(0, 1, 0);
 let _lastSentInput = { mx: 0, mz: 0, yaw: 0, jump: false };
 let _lastInputSendFrame = 0;
 
+// Input send clock: matches the server's 20Hz tick; each input is one server physics step
+const INPUT_SEND_INTERVAL_MS = 50;
+const MAX_INPUTS_PER_FRAME = 3; // Avoid a burst after a stall or tab resume
+let _inputSendAccumulator = 0;
+
 // Gun system state
 let _gunBPressCount = 0; // Track B key presses for gun state
 
@@ -1109,8 +1114,15 @@ function animate() {
     updatePlayerFootsteps();
     updateDistanceBasedFog(characterControls.model.position);
 
-    // Send input to server (every other frame = 30fps to avoid rate limits)
-    if (networkClient && networkClient.connected && frameCount % 2 === 0) {
+    // Send input to server on wall-clock time, independent of frame rate
+    if (networkClient && networkClient.connected) {
+      _inputSendAccumulator += deltaT * 1000;
+    }
+    if (
+      networkClient &&
+      networkClient.connected &&
+      _inputSendAccumulator >= INPUT_SEND_INTERVAL_MS
+    ) {
       // Get camera direction (same as CharacterControls uses)
       camera.getWorldDirection(_cameraDirection);
       _cameraDirection.y = 0;
@@ -1154,11 +1166,22 @@ function animate() {
       const jumpPressed =
         keysPressed[SPACE] || characterControls.aPressed || false;
 
-      // Send input at 20Hz to match server tick rate (every 3 frames at 60fps)
+      // One input per elapsed 50ms; drop any excess beyond the per-frame cap
       // Don't send input if player is frozen from bullet hit
-      if (frameCount % 3 === 0 && !isPlayerFrozen) {
-        networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
-        _msgSentCount++;
+      let inputsSent = 0;
+      while (
+        _inputSendAccumulator >= INPUT_SEND_INTERVAL_MS &&
+        inputsSent < MAX_INPUTS_PER_FRAME
+      ) {
+        _inputSendAccumulator -= INPUT_SEND_INTERVAL_MS;
+        inputsSent++;
+        if (!isPlayerFrozen) {
+          networkClient.sendInput(localMx, localMz, yaw, jumpPressed);
+          _msgSentCount++;
+        }
+      }
+      if (_inputSendAccumulator >= INPUT_SEND_INTERVAL_MS) {
+        _inputSendAccumulator = 0;
       }
     }
 
