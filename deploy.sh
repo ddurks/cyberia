@@ -9,6 +9,7 @@
 #   ./deploy.sh --no-invalidate  # Skip CloudFront invalidation
 
 set -e
+cd "$(dirname "$0")"
 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 BUCKET_NAME="cyberia-drawvid-frontend-$AWS_ACCOUNT_ID"
