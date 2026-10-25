@@ -33,6 +33,7 @@ echo "📤 Deploying to S3..."
 echo "   Assets (1h cache)..."
 aws s3 sync dist/assets "s3://$BUCKET_NAME/assets" \
   --cache-control "public, max-age=3600" \
+  --exclude "*.DS_Store" \
   --delete \
   --region us-east-2
 
