@@ -1578,9 +1578,6 @@ if (IS_MOBILE) {
 // Cleanup on disconnect
 window.addEventListener("beforeunload", () => {
   if (networkClient) {
-    if (networkClient.voiceManager) {
-      networkClient.voiceManager.disconnect();
-    }
     networkClient.disconnect();
   }
   if (offScreenIndicators) {

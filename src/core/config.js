@@ -1,11 +1,6 @@
 // Configuration for connecting to backend
 // Switch between local development and production
 
-// Feature flags
-export const FEATURES = {
-  PROXIMITY_VOICE: false, // Set to true to enable WebRTC proximity voice
-};
-
 // Get the host IP from URL (for network access) or use localhost
 const getServerHost = () => {
   // If accessing via IP (e.g., 192.168.1.x:3000), use that IP for server

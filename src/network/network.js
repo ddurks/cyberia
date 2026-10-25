@@ -1,8 +1,6 @@
 // Network client for connecting to drawvidverse matchmaker and world server
 // Handles WebSocket connections, authentication, and message protocol
 
-import { VoiceManager } from "./voiceManager.js";
-import { FEATURES } from "../core/config.js";
 
 export class NetworkClient {
   constructor() {
@@ -21,15 +19,11 @@ export class NetworkClient {
     this.playerName = "Player";
     this.coatColor = { r: 255, g: 255, b: 255 };
 
-    // Voice manager for proximity audio
-    this.voiceManager = null;
-
     // Callbacks
     this.onConnected = null;
     this.onSnapshot = null;
     this.onBootstrapRequired = null;
     this.onBootstrapData = null;
-    this.onVoicePeers = null;
     this.onChat = null; // Callback for chat messages
     this.onBulletSpawn = null; // Callback for bullet spawn
     this.onBulletHit = null; // Callback for bullet hit
@@ -281,22 +275,6 @@ export class NetworkClient {
       version: 1,
       payload,
     });
-  }
-
-  // Send WebRTC signaling
-  sendRTCOffer(to, sdp) {
-    const msg = { t: "rtcOffer", to, sdp };
-    this._sendToWorld(msg);
-  }
-
-  sendRTCAnswer(to, sdp) {
-    const msg = { t: "rtcAnswer", to, sdp };
-    this._sendToWorld(msg);
-  }
-
-  sendRTCIce(to, candidate) {
-    const msg = { t: "rtcIce", to, candidate };
-    this._sendToWorld(msg);
   }
 
   disconnect() {
@@ -599,11 +577,6 @@ export class NetworkClient {
               this.playerId = msg.playerId;
               if (log) log(`✓ Welcome received, authenticated!`);
 
-              // Initialize voice manager (if enabled)
-              if (FEATURES.PROXIMITY_VOICE && !this.voiceManager) {
-                this.voiceManager = new VoiceManager(this);
-              }
-
               if (this.onConnected) {
                 this.onConnected(this.playerId);
               }
@@ -713,11 +686,6 @@ export class NetworkClient {
             this.playerId = msg.playerId;
             if (log) log(`✓ Welcome received from direct connection!`);
 
-            // Initialize voice manager (if enabled)
-            if (FEATURES.PROXIMITY_VOICE && !this.voiceManager) {
-              this.voiceManager = new VoiceManager(this);
-            }
-
             if (this.onConnected) {
               this.onConnected(this.playerId);
             }
@@ -758,7 +726,7 @@ export class NetworkClient {
 
   _handleWorldMessage(msg) {
     // Skip logging noisy messages
-    if (msg.t !== "voicePeers" && msg.t !== "s") {
+    if (msg.t !== "s") {
       // World message received
     }
 
@@ -789,33 +757,6 @@ export class NetworkClient {
       case "s": // Snapshot
         if (this.onSnapshot) {
           this.onSnapshot(msg);
-        }
-        break;
-
-      case "voicePeers":
-        if (FEATURES.PROXIMITY_VOICE && this.voiceManager && this.playerId) {
-          this.voiceManager.updateVoicePeers(msg.peers, this.playerId);
-        }
-        if (this.onVoicePeers) {
-          this.onVoicePeers(msg.peers);
-        }
-        break;
-
-      case "rtcOffer":
-        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
-          this.voiceManager.handleRTCOffer(msg.from, msg.sdp);
-        }
-        break;
-
-      case "rtcAnswer":
-        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
-          this.voiceManager.handleRTCAnswer(msg.from, msg.sdp);
-        }
-        break;
-
-      case "rtcIce":
-        if (FEATURES.PROXIMITY_VOICE && this.voiceManager) {
-          this.voiceManager.handleRTCIce(msg.from, msg.candidate);
         }
         break;
 
